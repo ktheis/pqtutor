@@ -44,16 +44,18 @@ Call hierarchy:
 
 """
 
-import quantities
-from quantities import Q, X, Units, QuantError, latex_name, unitquant
-from re import Scanner, UNICODE, match
 from form import exdict
+from mathparser import CalcError, interpret, make_paired_tokens, scan_it
+from mathparser import check_name, extract_identifier, scan, create_Python_expression
+import quantities
+from quantities import QuantError, Q, X, latex_name, unitquant, Units
+from comments import typicalunits, format_identifier, markup_comments
+#from mpmath import mpf
 from fractions import Fraction
+#X, Units, Fraction are all for an eval statement
 
-class CalcError(ArithmeticError): pass
 
-
-def calc(memory, commands, mob):
+def calc(memory, commands, browser=None):
     '''
 
     :param memory: quantities already defined, given as repr()s line by line in a string
@@ -61,11 +63,14 @@ def calc(memory, commands, mob):
     :param mob: device the output will be sent to (determines format)
     :return: everything needed to show the result in a browser and keep state for the next calculation
     '''
-    state = State(memory, mob)
+    state = State(memory)
+    #rint('commands', commands)
     command_list = commands.replace('\r', '').split("\n")
     try:
         for command in command_list:
-            print ("%s" % command)
+            if not command:
+                continue
+            #rint ("command: %s" % command)
             input_type, name, expression = classify_input(command, state)
             if input_type == Calculation:
                 name = check_name(name, state)
@@ -85,7 +90,7 @@ def calc(memory, commands, mob):
     except (CalcError, OverflowError, QuantError) as err:
         deal_with_errors(err, command, state)
     return state.export()
-    # return output, logput, memory, known, mob, oneline, linespace
+    # return output, logput, memory, known, mob, linespace
 
 
 from collections import OrderedDict
@@ -105,17 +110,32 @@ class State(OrderedDict):
         self.logput = []
         self.good_input = []
         self.mob = mob
+        self.snuck = 0
+
         if mob == 'ipud':
             self.flags.add('plain math')
+        #self['R'] = Q(8.3144598, 'R', Units(kg=1,m=2,s=-2,mol=-1,K=-1), 4.8e-06, {'mol', 'J', 'K'})
         if memory:
             old = memory.replace('\r', '').split('\n')
             for a in old:
                 if a.startswith('__') or a == 'plain math':
                     self.flags.add(a)
                 else:
-                    #print(a)
-                    sym = a.split("'")[1]
-                    self[sym] = eval(a)
+                    q = eval(a)
+                    self[q.name] = q
+
+    def addsnuck(self, q):
+        name = 'Snuck{}'.format(self.snuck)
+        self.snuck += 1
+        self[name] = q
+
+    def popsnuck(self):
+        if self.snuck > 0:
+            self.snuck -= 1
+            name = 'Snuck{}'.format(self.snuck)
+            del(self[name])
+        else:
+            pass #raise ZeroDivisionError
 
     def printit(self, str):
         self.output.append(str)
@@ -128,6 +148,15 @@ class State(OrderedDict):
         self.logput.append(str)
 
     def printwork(self, outlog):
+        #rint()
+        #rint('-2', self.output[-2][-80:])
+        cond1 =  len(self.output) >= 2
+        cond2 = cond1 and not self.output[-2].endswith('>')
+        if cond1 and cond2:
+            self.printnlog('<br>')
+        #rint('-1', self.output[-1][-80:])
+        #rint(' 0', outlog[0][0][:80])
+        #rint(' 1', outlog[0][1][:80])
         self.output.extend(outlog[0])
         self.logput.extend(outlog[1])
 
@@ -140,13 +169,18 @@ class State(OrderedDict):
         memory = [q.__repr__() for q in self.values()]
         flags = [f for f in self.flags]
         memory.extend(flags)
+        m = '\n'.join(memory)
         known = [s + " = " + self[s].__str__() for s in self]
-        oneline = ("__oneline__" in self.flags)
         if "__latex__" in self.flags:
             self.output = ["<pre>"] + self.output + ["</pre>"]
         input_log = '\n'.join(self.good_input)
+        if not input_log.endswith('\n'):
+            input_log = input_log + '\n'
+        verbose_work = '\n'.join(self.output)
+        brief_work = '\n'.join(self.logput)
         linespace = '40%' if '__scrunch__' in self.flags else '100%'
-        return self.output, self.logput, memory, known, oneline, input_log, linespace
+        return (verbose_work, brief_work, m, known, linespace), input_log
+
 
 
 def classify_input(a, state):
@@ -173,519 +207,56 @@ def classify_input(a, state):
     (4, None, None)
 
     '''
+    #rint('a', a)
     if not a or not a.strip():
         return Empty, None, None
+    #rint('wahh', '\n'.join(state.output[-3:]))
     if '__tutor__' in state.flags and not a.startswith('__'):
-        state.printit("<pre><b>>>>> %s</b></pre>" % a)
+        state.printit('<pre style="color:maroon"><b>>>>> %s</b></pre>' % a.replace('<','&lt;').replace('>','&gt;'))
     elif not a.startswith('__'):
-        state.printit("<br>")
-    state.logit("<br>")
+        state.printit("<br>" if not '/h' in ''.join(state.output[-1:]) else '')
+    state.logit("<br>" if not '</h' in ''.join(state.logput[-1:]) else '')
 
     if a[0] in "!#@":
         return Comment, a, None
     a = a.strip()
     if a.startswith('__'):
         if not '=' in a:
-            return Comment, '#'+ a, None
+            return Comment, a, None
         name, onoff = a.split('=', 1)
         return Flags, name.strip(), onoff
-    start = 0
-    m = match(re_identifier, a)
-    if m:
-        start = m.end()
+    m = extract_identifier(a)
+    start = m.end() if m else 0
     rest = a[start:].strip()
     if m and rest.startswith('='):
-        if rest[1:].strip()[0] != '?':
-            return Calculation, a[:start], rest[1:]
-        return Unknown, a[:start], None
-    elif m and rest.startswith('using'):
+        r2 = rest[1:].strip()
+        if not r2:
+            return Empty, None, None
+        if r2[0] == '?':
+            return Unknown, a[:start], None
+        scanned, remainder = scan_it(rest[1:])
+        if remainder and remainder.startswith('='):
+            return Comment, a, None
+        return Calculation, a[:start], rest[1:]                               # Calculation #
+    elif m and a[start:].startswith(' using') and a[:start].strip() in state:
         return ConversionUsing, a[:start], rest[len('using'):].strip()
-    elif m and rest.startswith('in'):
+    elif m and a[start:].startswith(' in ') and a[:start].strip() in state:
         return ConversionIn, a[:start], rest[len('in'):].strip()
-    else:
-        if '__tutor__' in state.flags:
-            raise CalcError("Your tutor says: Please come up with a name for the quantity you are calculating")
-        try:
-            interpret(a, state)
-            return Calculation, "result", a
-        except:
-            return Comment, '#'+ a, None
+    if '__tutor__' in state.flags:
+        raise CalcError("Your tutor says: Please come up with a name for the quantity you are calculating")
+    try:
+        interpret(a, state, warning=False)
+        return Calculation, "result", a
+    except:
+        return Comment, a, None
+
 
 
 Empty, Calculation, ConversionIn, ConversionUsing, Comment, Flags, Unknown = range(7)
 
 
-def check_name(sym, state):
-    '''
-    Check whether the name chosen for a quantity conforms to the rules and doesn't clash with a name already used
 
-    :param sym: a name for a new quantity
-    :param state: contains known quantities as ordered dict, along with flags and output
-    :return: no return value (sym and output get changed in place)
-    '''
-    tokens, remainder = scanner.scan(sym)
-    if len(tokens) != 1 or tokens[0][0] != "I":
-        raise CalcError(("Please don't use %s as a name for a quantity<br><pre>%s</pre>" %
-                         (sym, rules_for_symbol_name)))
-    if sym in quantities.unitquant or sym in quantities.functions:
-        conf = "function" if sym in quantities.functions else "unit"
-        state.printit(
-            '<div style="color: green;">Warning: %s changed to %s_ to avoid confusion with the %s</div><br>' % (
-                sym, sym, conf))
-        sym = sym + "_"
-    return sym
-
-
-rules_for_symbol_name = """Rules for names: Start with a letter, then letters or numbers or underscores.
-  Examples: m0, y, s_15
-Special rule #1: You can add anything in brackets, [...], or just have something in brackets
-  Examples: [NaCl], [Na+], c[Na+], M[Na+]
-Special rule #2: You can't use names already used for units or functions. If you do, the program will add an underscore.
-  Examples: mm, s, V, and log are not allowed, and will be used as mm_, s_, V_, and log_"""
-
-
-def interpret(t, state):
-    '''
-    Process input mathematical expression into a valid Python expression and return the result of evaluating it. This is
-    a four step process. First, the string is broken into tokens by scan(), then grouped into pairs of operators and
-    values by make_paired_tokens(), then turned into a valid Python expression by create_Python_expression, and finally
-    evaluated with eval() to yield a quantity Q().
-
-    :param t: the expression as string
-    :param state: contains known quantities as ordered dict, along with flags and output
-    :return: a quantity Q()
-
-    >>> str(interpret('3 mol/L', State()))
-    '3 mol/L'
-    >>> str(interpret('30 s + 1 min', State()))
-    '(3 / 2) min'
-
-    There are implicit parentheses around a number and the units following it.
-    >>> str(interpret('4 mol/L / 2 mol/L', State()))
-    '2'
-
-    Multiple fraction slashes in units are confusing, better to use parentheses to group explicitly
-    >>> str(interpret('3.5 J/mol/K', State()))
-    '3.5 J/(K mol)'
-    >>> str(interpret('3.5 J/mol K', State()))
-    '3.5 K J/mol'
-    >>> str(interpret('3.5 J/(mol K)', State()))
-    '3.5 J/(K mol)'
-
-    Non base units are retained
-    >>> str(interpret('5.6 mmol', State()))
-    '5.6 mmol'
-
-    Math with symbols is allowed as long symbols are defined
-    >>> str(interpret('2a', State("Q(2.5, units=Units(), uncert=0.1, name='a')")))
-    '5.0'
-
-    ?>>> interpret('2a', State())
-    calculator.CalcError: unknown symbol a encountered
-
-    Here are the actual results:
-    >>> interpret('3 mol/L', State())
-    Q(3000.0, '', Units(m=-3,mol=1), 0.0, set([u'L', u'mol']))
-    >>> interpret('30 s + 1 min', State())
-    Q(90.0, '%s + %s', Units(s=1), 0.0, set([u's', u'min']), (Q(30.0, '', Units(s=1), 0.0, set([u's'])), Q(60.0, '', Units(s=1), 0.0, set([u'min']))))
-    >>> interpret('4 mol/L / 2 mol/L', State())
-    Q(2.0, '%s / %s', Units(), 0.0, set([u'L', u'mol']), (Q(4000.0, '', Units(m=-3,mol=1), 0.0, set([u'L', u'mol'])), Q(2000.0, '', Units(m=-3,mol=1), 0.0, set([u'L', u'mol']))))
-    >>> interpret('3.5 J/mol/K', State())
-    Q(3.5, '', Units(kg=1,m=2,s=-2,mol=-1,K=-1), 0.1, set([u'K', u'J', u'mol']))
-    >>> interpret('3.5 J/mol K', State())
-    Q(3.5, '', Units(kg=1,m=2,s=-2,mol=-1,K=1), 0.1, set([u'K', u'J', u'mol']))
-    >>> interpret('3.5 J/(mol K)', State())
-    Q(3.5, '', Units(kg=1,m=2,s=-2,mol=-1,K=-1), 0.1, set([u'K', u'J', u'mol']))
-    >>> interpret('5.6 mmol', State())
-    Q(0.0056, '', Units(mol=1), 0.00010000000000000002, set([u'mmol']))
-    >>> interpret('2a', State("Q(2.5, units=Units(), uncert=0.1, name='a')"))
-    Q(5.0, '%s * %s', Units(), 0.2, set([]), (Q(2.0, units=Units(), uncert=0.0), Q(2.5, 'a', Units(), 0.1)))
-    '''
-
-    paired = make_paired_tokens(scan(t))
-    try:
-        expression = create_Python_expression(paired, state)
-        #print("before eval", expression)
-################ EVAL EVAl EVAL #######################
-        q = eval(expression)
-################ EVAL EVAl EVAL #######################
-        if type(q) != Q:
-            #print(expression)
-            #print(type(q))
-            raise CalcError('<div style="color: red;">misused comma? %s</div><br>' % expression)
-        return q
-    #except SyntaxError as err:
-    #    raise CalcError('<br>%s<br><br><div style="color: red;">Mangled math: %s</div><br>' % (t, err))
-    except OverflowError as duh:
-        raise CalcError('<br>%s<br><br><div style="color: red;">Math overflow (thanks, Jonas): %s</div><br>' % (t, duh))
-    #except AttributeError as duh:
-    #    raise CalcError('<br>%s<br><br><div style="color: red;">Comma again?: %s</div><br>' % (t, duh))
-
-
-def scan(t):
-    '''
-    Scan text for identifers('I'), operators('O'), numbers('N') and comments('C') using the regular expression scanner.
-
-    :param t: string of the expression to be parsed
-    :return: list of tuples containing tokens ('X', text)
-
-    >>> scan('3 mol/L')
-    [(u'N', u'3'), (u'O', u''), (u'U', u'mol'), (u'O', u'/'), (u'U', u'L'), (u'O', u''), (u'Z', u'')]
-
-    >>> scan('30 s + 1 min')
-    [(u'N', u'30'), (u'O', u''), (u'U', u's'), (u'O', u'+'), (u'N', u'1'), (u'O', u''), (u'U', u'min'), (u'O', u''), (u'Z', u'')]
-
-    >>> scan('2a')
-    [(u'N', u'2'), (u'I', u'a'), (u'O', u''), (u'Z', u'')]
-
-    >>> scan('4 7 #comment')
-    [(u'N', u'4'), (u'O', u''), (u'N', u'7'), (u'O', u''), (u'C', u'#comment'), (u'Z', u'')]
-    '''
-
-    tokens, remainder = scanner.scan(t + " ")
-    if remainder:
-        raise CalcError("got stuck on |%s|" % remainder)
-    flatop = (c for ttyp, ttex in tokens if ttyp == 'O' for c in ttex)
-    paren = 0
-    for c in flatop:
-        if c == '(':
-            paren += 1
-        elif c == ')':
-            if not paren:
-                raise CalcError("Closing parenthesis ')' is missing a matching opening one '(' to the left of it")
-            paren -= 1
-    if paren:
-        raise CalcError("Parentheses don't match: need %d more ')'" % paren)
-    tokens.append(("Z", ""))
-    for i, (ttype, ttext) in enumerate(tokens):
-        if ttype == "I":
-            if ttext.endswith("Ohm"):
-                ttext = ttext.replace("Ohm", "Ω")
-            if ttext in quantities.unitquant:
-                if ttext.startswith("u"):
-                    ttext = "μ" + ttext[1:]
-                tokens[i] = "U", ttext
-                if ttext == 'min' and len(tokens) > i and '(' in tokens[i+1][1] and any(',' in t[1] for t in tokens[i+1:] ):
-                    tokens[i] = 'F', ttext
-            elif ttext in quantities.functions:
-                tokens[i] = "F", ttext
-    infunc = []
-    paren = 0
-    for ttype, _ in tokens: #huh, doesnt do anything?
-        if ttype == 'F':
-            infunc.append(paren)
-    return tokens
-
-
-def identifier(scanner, token): return "I", token.strip()
-
-
-def operator(scanner, token): return "O", token.strip()
-
-
-def float2(scanner, token): return "N", token.strip()
-
-
-def comment(scanner, token): return "C", token.strip()
-
-
-re_identifier = r"[^\[ ,()/*\^+\-=]+(\[[^]]+\])?[^\[ ,()/*\^+\-=]*|\[[^]]+\][^\[ ,()/*\^+\-=]*"
-
-scanner = Scanner([
-                      (r"[#!].*", comment),
-                      (r"[ ,()/*^+-]+", operator),
-                      (r"((\d*\.\d+)|(\d+\.?))(\(\d\d?\))?([Ee][+-]?\d+)?", float2),
-                      (re_identifier, identifier),
-                  ], UNICODE)
-
-"""
-operator: one or more of the following: | ,()/*^+-|
-float2: any floating point representation with uncertainty, e.g. 3.5(1)E-34
-identifier: has to start with non-operator non-digit, may have something in brackets, may have something added
-identifier: anything in brackets followed by anything
-"""
-
-
-def make_paired_tokens(raw_tokens):
-    '''
-
-    :param raw_tokens: A list of tokens (item ID, str) from scan()
-    :return: a list of paired tokens (item ID, pre-operator, item text)
-
-    Folds operator and identifier/number tokens into paired tokens containing item ID (N, U, I, Z), pre-operator and item text.
-
-    This is the second step in turning the input text into a Python expression.
-    It also adds implicit '*' operators and removes comments. There might be artifact '*' at the beginning and at the end.
-
-    User input '3 mol/L' turns into '* 3 * mol / L *'
-    >>> make_paired_tokens([('N', '3'), ('O', ''), ('U', 'mol'), ('O', '/'), ('U', 'L'), ('O', ''), ('Z', '')])
-    [[u'N', u'*', u'3'], [u'U', u'*', u'mol'], [u'U', u'/', u'L'], [u'Z', u'*', u'']]
-
-    User input '30 s + 1 min' turns into '* 30 * s + 1 * min *'
-    >>> make_paired_tokens([('N', '30'), ('O', ''), ('U', 's'), ('O', '+'), ('N', '1'), ('O', ''), ('U', 'min'), ('O', ''), ('Z', '')])
-    [[u'N', u'*', u'30'], [u'U', u'*', u's'], [u'N', u'+', u'1'], [u'U', u'*', u'min'], [u'Z', u'*', u'']]
-
-    User input '2a' turns into '* 2 * a *'
-    >>> make_paired_tokens([('N', '2'), ('I', 'a'), ('O', ''), ('Z', '')])
-    [[u'N', u'*', u'2'], [u'I', u'*', u'a'], [u'Z', u'*', u'']]
-
-    User input '4 7' turns into '* 4 * 7 *'
-    >>> make_paired_tokens([('N', '4'), ('O', ''), ('N', '7'), ('O', ''), ('C', '#comment'), ('Z', '')])
-    [[u'N', u'*', u'4'], [u'N', u'*', u'7'], [u'Z', u'*', u'']]
-
-    '''
-    #print ('make_paired_tokens', raw_tokens)
-    tokens = []
-    tokenit = (x for x in raw_tokens)
-    for ttype, ttext in tokenit:
-        if ttype == "O":
-            if ttext:
-                operator = ttext
-            else:
-                operator = "*"
-            for c in operator:
-                if c in "+-*/^,":
-                    break
-            else:
-                operator = fixoperator(operator, tokens)
-            if ',' in operator:
-                if len(tokens) < 1 or not any(t[0] == 'F' for t in tokens):
-                    raise CalcError("commas are only allowed to separate arguments of functions; didn't find any function preceeding the comma")
-                pre = operator.split(',',1)
-                paren = pre.count('(') - pre.count(')')
-                for i,t in reversed(list(enumerate(tokens))):
-                    if paren == 0 and t[1].endswith('(') and i > 0:
-                        #print (tokens)
-                        if tokens[i-1][0] == 'F':
-                            break
-                        raise CalcError("commas are allowed only to separate arguments of functions; %s is not function" % tokens[i-1][2])
-                    if paren > 0:
-                        raise CalcError("commas are allowed only to separate arguments of functions; parentheses count off")
-                    paren += t[1].count('(') - t[1].count(')')
-                else:
-                    raise CalcError("commas are allowed only to separate arguments of functions")
-            if hasattr(tokenit, "__next__"):  # python 2.7 vs 3.1
-                ttype, ttext = tokenit.__next__()
-            else:
-                ttype, ttext = tokenit.next()
-        else:
-            operator = "*"
-        if ttype == "C":
-            tokens.append(["Z", operator, ""])
-            break
-        tokens.append([ttype, operator.replace("^", "**"), ttext])
-    return fixfractions(tokens)
-
-def fixfractions(tokens):
-    newtokens = []
-    while tokens:
-        # ['N','...(','integer'],['N','/','integer'],['...',')','...]
-        if (len(tokens) > 2 and tokens[0][0] == 'N' and tokens[1][0] == 'N' and tokens[0][1].endswith('(') and tokens[2][1].startswith(')') and tokens[1][1] == '/' and
-            '.' not in tokens[0][2] and '.' not in tokens[1][2] and int(tokens[1][2]) != 0):
-                fractoken = ['N', tokens[0][1], '%s / %s' % (tokens[0][2], tokens[1][2])]
-                newtokens.append(fractoken)
-                tokens.pop(0)
-                tokens.pop(0)
-        else:
-            newtokens.append(tokens.pop(0))
-    #print (newtokens)
-    return newtokens
-
-
-def fixoperator(operator, tokens):
-    """
-    Change implicit multiplication to explicit '*' in operator unless it follows a function call.
-
-    >>> fixoperator(' ', ['I'])
-    u' *'
-    >>> fixoperator(' )  (   ', ['I'])
-    u' )  *(   '
-    >>> fixoperator(') ', ['I'])
-    u') *'
-    >>> fixoperator('(', ['I'])
-    u'*('
-    >>> fixoperator('(', ['F'])
-    u'('
-
-    no '*' inserted prior to function call
-    """
-
-    if tokens and tokens[-1][0] == "F":
-        return operator
-    if '(' in operator:
-        return "*(".join(operator.split('(',1))
-    return operator + '*'
-
-
-def create_Python_expression(paired_tokens, state, free_expression = False):
-    '''
-
-    :param paired_tokens: parsed and processed list of tokens from make_paired_tokens
-    :param state: contains known quantities as ordered dict, along with flags and output
-    :return: a string containing a valid python expression yielding a quantity Q() as result
-
-    User input '3 mol/L'
-    >>> create_Python_expression([['N', '*', '3'], ['U', '*', 'mol'], ['U', '/', 'L'], ['Z', '*', '']], {})
-    u"Q(3000.0, '', Units(m=-3,mol=1), 0.0, set(['L', 'mol']))"
-
-    User input '30 s + 1 min)
-    >>> create_Python_expression([['N', '*', '30'], ['U', '*', 's'], ['N', '+', '1'], ['U', '*', 'min'], ['Z', '*', '']], {})
-    u"Q(30.0, '', Units(s=1), 0.0, set(['s']))+Q(60.0, '', Units(s=1), 0.0, set(['min']))"
-
-    User input '4 7'
-    >>> create_Python_expression([['N', '*', '4'], ['N', '*', '7'], ['Z', '*', '']], {})
-    u"Q('4')*Q('7')"
-
-    User input '2a'
-    >>> create_Python_expression([['N', '*', '2'], ['I', '*', 'a'], ['Z', '*', '']], {})
-    calculator.CalcError: unknown symbol a encountered
-
-    User input '2a'
-    >>> create_Python_expression([['N', '*', '2'], ['I', '*', 'a'], ['Z', '*', '']], State("Q(number=5.0, name='a')"))
-    u"Q('2')*Q(5.0, 'a', Units(), 0.0)"
-
-    User input 'log(7)'
-    >>> create_Python_expression([['F', '*', 'log'], ['N', '(', '7'], ['Z', ')*', '']], {})
-    u"quantities.log(Q('7'))"
-
-    '''
-
-    result = []
-    complaint = '__tutor__' in state.flags and any(x[0]=='I' for x in paired_tokens) and any(x[0]=='U' for x in paired_tokens)
-    while True:  # consume "Z", "I", "F", "U", "N" in paired_tokens
-        ttype, operator, ttext = paired_tokens.pop(0)
-        if ttype in "ZIF":
-            result.append(operator)
-            if ttype == "Z":
-                #print ('at end:', ttype, operator, ttext, result)
-                break
-            if ttype == "F":
-                result.append("quantities.qfunc('" + ttext + "',")
-                paired_tokens[0][1] = paired_tokens[0][1].replace('(', '', 1)
-            else:  # ttype == "I"
-                if ttext in state:
-                    result.append(state[ttext].__repr__())
-                elif free_expression:
-                    result.append("X('%s')" % ttext)
-                else:
-                    raise CalcError("unknown symbol |%s| encountered" % ttext)
-            continue
-        # ttype in "UN", i.e. either unit or number
-        quant = ["Q('%s')" % ttext]
-        if ttype == "N" and "." in ttext:
-            if magic(ttext if "(" not in ttext else ttext.split("(")[0]) and not "__showuncert__" in state.flags:
-                raise CalcError(
-                    "If you always use powerful tools, your basic skills might get rusty. Do this calculation using a method other than PQCalc, please")
-        if ttype == "N" and paired_tokens[0][0] != "U":
-            result.append(operator)
-            result.append(quant[0])
-            continue
-        quant_text, paired_tokens = interpret_N_U_cluster(quant, paired_tokens, complaint)
-        result.append('%s%s' % (operator, quant_text))
-    expression = "".join(result)[:-1]
-    if expression.endswith('*'):
-        expression = expression[:-1]
-    if free_expression:
-        expression =  expression.replace('Q(', 'X(').replace('quantities.q', 'quantities.x')
-    if expression.startswith("*"):
-        return expression[1:]
-    return expression
-
-def interpret_N_U_cluster(quant, orig_paired, complaint):
-    '''
-    Find quantity introduced on the fly and evaluate as Q(). This is done to avoid cluttering the output with
-    trivial calculations such as 2 * mol / L = 2 mol/L. This step also has consequences for order of operation, as
-    quantities with units are treated as a single entity (with implied parentheses around them).
-
-    Has to figure out where quantity ends, e.g. 8.314 J/(K mol) * 273 K or 5 mol/L / 2 mol/L
-                                                ***************   +++++    *******   +++++++
-
-    Complications arise with exponents in the units, e.g. 5 m ** 2 / J
-    or parentheses, e.g. 8.314 J/(K mol) vs 8.314 J /(K 2 kg)
-
-    :param quant: a list containing the first quantity in the cluster, e.g. "Q('2')" or "Q('kg')
-    :param orig_paired: the paired list containing items on the right of the first quantity in the cluster
-    :return: repr() of the quantity, and the paired tokens that have not been used
-
-    user input: '3 mol / L'
-    >>>interpret_N_U_cluster(["Q('3')"],[['U', '*', 'mol'], ['U', '/', 'L'], ['Z', '*', '']])
-    ("Q(3000.0, '', Units(m=-3,mol=1), 0.0, set(['L', 'mol']))", [['Z', '*', '']])
-
-    user input: '30 s + 1 min'
-    >>>interpret_N_U_cluster(["Q('30')"],[['U', '*', 's'], ['N', '+', '1'], ['U', '*', 'min'], ['Z', '*', '']])
-    ("Q(30.0, '', Units(s=1), 0.0, set(['s']))", [['N', '+', '1'], ['U', '*', 'min'], ['Z', '*', '']])
-    '''
-
-    paired = orig_paired[:]
-    complaint = complaint and any('U' in x for x in orig_paired)
-    notyetclosed = None
-    openp = 0
-    for i, (ttype, op, ttext) in enumerate(paired):
-        o = op.count("(")
-        c = op.count(")")
-        if o:
-            openp += o
-            if not notyetclosed:
-                notyetclosed = i  # start of new parentheses that might not close
-        if c:
-            openp -= c
-            if openp < 0:
-                break
-            notyetclosed = None
-        if not (ttype == "U" or (ttype == "N" and "**" in op)):
-            break  # we're done if we encounter anything but a unit (with the exception of an exponent on a unit)
-    end = notyetclosed if notyetclosed else i  # take up to open parenthesis that wasn't closed, or to end of N-U cluster
-    for j in range(end):
-        quant.append(paired[j][1] + "Q('%s')" % paired[j][2])
-    quantstr = "".join(quant)
-    #print('before paren', quantstr, paired[end][1])
-    openparentheses = quantstr.count("(") - quantstr.count(")")
-    if openparentheses > 0:
-        for ii, c in enumerate(paired[end][1]):
-            if c == ")":
-                openparentheses -= 1
-            if not openparentheses:
-                break
-        else:
-            raise CalcError("parentheses count off %s %s" % (quant, paired[end][1]))
-        quantstr = quantstr + paired[end][1][:ii + 1]
-        paired[end][1] = paired[end][1][ii + 1:]
-    try:
-        #print ('before eval', quantstr, paired[end][1])
-################ EVAL EVAl EVAL #######################
-        q = eval(quantstr)
-################ EVAL EVAl EVAL #######################
-    except SyntaxError:
-        raise CalcError('<br>%s<br><br><div style="color: red;">Mangled math</div><br>' % quantstr)
-    except OverflowError as duh:
-        raise CalcError('<br>%s<br><br><div style="color: red;">Math overflow: %s</div><br>' % (quantstr, duh))
-    except AttributeError as duh:
-        raise CalcError('<br>%s<br><br><div style="color: red;">Bad comma?: %s</div><br>' % (quantstr, duh))
-    if complaint:
-        raise CalcError('<br>%s<br><br><div style="color: red;">Please give all quantities a name before using them in a calculation</div><br>' % q)
-
-    q.name = ""
-    q.provenance = []
-    return repr(q), paired[end:]
-
-
-endings = {"9351", "1736", "2271", "0261", "3589", "4259", "5257", "8637", "6264", "7126"}
-
-
-def magic(numberstring):
-    if "e" in numberstring:
-        numberstring = numberstring.split("e")[0]
-    if "E" in numberstring:
-        numberstring = numberstring.split("E")[0]
-    if len(numberstring) < 5:
-        return False
-    dig = [int(i) for i in numberstring.replace(".", "")]
-    quer = sum(int(n) for n in dig[:-4])
-    four = "%04d" % int("".join(str((d + quer) % 10) for d in dig[-4:]))
-    return four in endings
-
-
-def register_result(result0, sym, state):
+def register_result(result0, sym, state, keep_provenance=False):
     """
     Enters the quantity that was just calculated into the database
 
@@ -693,9 +264,12 @@ def register_result(result0, sym, state):
     :param sym: name of the quantity
     :param state: contains known quantities as ordered dict, along with flags and output
     """
-    result0.provenance = []
-    result0.name = sym[:]
-    if sym in state:
+    if not keep_provenance:
+        result0.provenance = []
+        result0.name = sym[:]
+    if hasattr(result0,'depth'):
+        del result0.depth
+    if sym in state and '__allowupdate__' not in state.flags:
         state.printit('<div style="color: green;">Warning: Updated value of %s</div><br>' % (format_identifier(sym)))
     state[sym] = result0
     if '__fracunits__' not in state.flags:
@@ -709,17 +283,6 @@ def register_result(result0, sym, state):
                     '<div style="color: green;">Warning: %s looks like a %s, but units are strange</div><br>' % (
                         format_identifier(sym), typicalunits[sym[0]][1]))
 
-
-typicalunits = dict(
-    c=(Units(m=-3, mol=1), "concentration"),
-    V=(Units(m=3), "volume"),
-    m=(Units(kg=1), "mass"),
-    P=(Units(kg=1, m=-1, s=-2), "pressure"),
-    T=(Units(K=1), "absolute temperature"),
-    t=(Units(s=1), "time"),
-    n=(Units(mol=1), "chemical amount"))
-
-typicalunits["["] = typicalunits["c"]
 
 
 latex_subs = {"%s / %s": "\\dfrac{%s}{%s}",
@@ -735,11 +298,11 @@ latex_subs = {"%s / %s": "\\dfrac{%s}{%s}",
             "sqrt(%s)": "\\sqrt{%s}",
             "quadn(%s": "\\mathrm{quadn}(%s",
             "quadp(%s": "\\mathrm{quadp}(%s",
-            "average(%s": "\\mathrm{average(%s",
-            "min(%s": "\\mathrm{min(%s",
-            "sum(%s": "\\mathrm{sum(%s",
-            "max(%s": "\\mathrm{max(%s",
-            "abs(%s": "\\mathrm{abs(%s",
+            "avg(%s": "\\mathrm{avg}(%s",
+            "min(%s": "\\mathrm{min}(%s",
+            "sum(%s": "\sum (%s",
+            "max(%s": "\\mathrm{max}(%s",
+            "abs(%s)": "\\mathrm{abs}(%s)",
             "moredigits(%s)": "\\mathrm{moredigits}(%s)",
             "uncertainty(%s)": "\\mathrm{uncertainty}(%s)",
     }
@@ -763,27 +326,28 @@ def show_work(result, sym, flags, error=False, addon="", skipsteps=False):
     if math:
         writer = quantities.latex_writer
         if not "__latex__" in flags:
-            logput.append('''<span style="color:navy; cursor:pointer; font-size:15pt;" onclick="insertAtCaret('commands','%s ', 0)">''' % sym)
-            output.append('''<span style="color:navy; cursor:pointer; font-size:15pt;" onclick="insertAtCaret('commands','%s ', 0)">''' % sym)
+            logput.append('''<span style="color:navy; cursor:pointer; font-size:12pt;" onclick="insertAtCaret('commands','%s ', 0)">''' % sym)
+            output.append('''<span style="color:navy; cursor:pointer; font-size:12pt;" onclick="insertAtCaret('commands','%s ', 0)">''' % sym)
     else:
         writer = quantities.ascii_writer
     subs = latex_subs if math else None
     d = result.setdepth()
     if math:
-        template1 = "\(%s = %s%s\)<br>"
+        template1 = "\(%s = %s%s\)%s<br>"
         template2 = "<br>\(\\ \\ \\ =%s%s\)<br>"
     else:
-        template1 = "%s = %s%s" if d <= 0 else "%s = \n   = %s%s"
+        template1 = "%s = %s%s%s" if d <= 0 else "%s = %s\n   = %s%s"
         template2 = "   = %s%s"
     task = result.steps(-1, writer, subs, ())  # task
     if '__hidenumbers__' in flags:
         task = result.steps(-1, quantities.latex_writer, subs)
     name = latex_name(sym) if math else sym
-    output.append(template1 % (name, task, addon))
-    logput.append(template1 % (name, task, addon))
+    output.append(template1 % (name, task, addon, result.comment))
+    logput.append(template1 % (name, task, addon, result.comment))
     if not skipsteps:
         for dd in range(1, d + 1):
             if dd == 1:
+
                 first = result.steps(dd, writer, subs, flags)
                 if '__hidenumbers__' in flags:
                     first = result.steps(dd, quantities.latex_writer, subs, {'__hidenumbers__'})
@@ -816,23 +380,41 @@ def convert_units(input_type, command, quant, units, state):
     """
     flags2 = set(i for i in state.flags if i != '__hideunits__')
     if input_type == ConversionUsing:
-        prefu = units.split()
-        for p in prefu:
-            if p not in unitquant:
-                raise CalcError(
-                    "PQCalc does not recognize the unit '%s', so 'using' does not work. Try 'in' instead." % p)
-        try:
+        if units in ['°ΔC','°aC']:
+            prefu = [units]
             q = state[quant.strip()] + Q(0.0)
-        except KeyError:
-            raise CalcError("The quantity '%s' is not defined yet. Check for typos." % quant.strip())
+            if units == '°aC' and unitquant['K'].units != q.units:
+                raise CalcError("Only quantities in kelvin may be converted to celsius")
+        else:
+            prefu = units.split()
+            for p in prefu:
+                if p not in unitquant:
+                    raise CalcError(
+                        "PQCalc does not recognize the unit '%s', so 'using' does not work. Try 'in' instead." % p)
+            try:
+                q = state[quant.strip()] + Q(0.0)
+            except KeyError:
+                raise CalcError("The quantity '%s' is not defined yet. Check for typos." % quant.strip())
         q.name = ""
         q.provenance = None
+        q.comment = ''
         outp, _ = show_work(q, quant, flags2)
         output = (outp[:-1])
         state[quant.strip()].prefu = set(prefu)
-        q = state[quant.strip()] + Q(0.0)
+        q_old = state[quant.strip()]
+        if q_old.provenance: # when called by calc2
+            q_old.name = ''
+            q_old.provenance = None
+        q = q_old + Q(0.0)
+        q.comment = ''
         outp, _ = show_work(q, quant, flags2)
         output.extend(outp[-2 if not 'plain math' in state.flags else -1:])
+        q = state[quant.strip()]
+        q.name = ""
+        q.provenance = None
+        _, logp = show_work(q, quant, flags2)
+        state.printit('\n'.join(output))
+        state.logit('\n'.join(logp))
     else:
         tmp = interpret(units, state)
         try:
@@ -840,13 +422,19 @@ def convert_units(input_type, command, quant, units, state):
         except KeyError:
             raise CalcError("The quantity '%s' is not defined yet. Check for typos." % quant.strip())
         addon = ("\mathrm{\ %s}" % quantities.latex_name(units)) if state.mob != "ipud" else units
-        output, _ = show_work(qq, quant, flags2, addon=addon)
-    state.printit('\n'.join(output))
+        work = show_work(qq, quant, flags2, addon=addon)
+        state.printwork(work)
 
 def create_unknown(sym, state):
-    state.printnlog('''<span style="color:navy; font-size:15pt; cursor:pointer" onclick="insertAtCaret('commands','%s ', 0)">''' % sym)
+    state.printnlog('''<span style="color:navy; font-size:12pt; cursor:pointer" onclick="insertAtCaret('commands','%s = ', 0)">''' % sym)
     state.printnlog("\(%s =\\ ?\)<br>" % latex_name(sym))
     state.printnlog('<br></span>')
+
+def change_flag(flags, name, expression):
+    if expression.strip() != '0':
+        flags.add(name)
+    else:
+        flags.discard(name)
 
 def create_comment(a, state):
     """
@@ -859,227 +447,82 @@ def create_comment(a, state):
         state.printnlog(a)
         return
     if a.startswith("!"):
-        state.printnlog('<span style="font-size: 15pt;">\\[\\ce{%s}\\]</span>' % a[1:])
-    elif a.startswith("@"):
+        cond =  len(state.output) < 2 or not state.output[-2].endswith('>')
+        crit = None if len(state.output) < 2 else state.output[-2]
+        if cond:
+            state.printnlog('<br>')
+        add = ''
+        app = ''
+        try:
+            first = a[1:].split()[0]
+            if first.startswith('[') and first.endswith(']') and len(first) < 12:
+                a = a[len(first):]
+                add = first[:]
+            if '!' in a[1:]:
+                a, app = a.rsplit('!', maxsplit=1)
+                app = '             ' + app
+        except:
+            add = ''
+            app = ''
+        '''<span style="color:navy; cursor:pointer; font-size:12pt;" onclick="insertAtCaret('commands','%s ', 0)">'''
+        result = chemeq_addlinks(a[1:])
+        if app:
+            app = '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' + markup_comments(app)
+        state.printnlog('''<div style="font-size:12pt; display: flex; justify-content: space-between;"><div>%s</div><div>%s %s</div><div></div></div>''' %
+                        (add, result, app))
+        return
+    if a.startswith("#"):
+        state.printnlog('<span style="font-size:12pt;">%s</span>' % a[1:])
+        return
+    if a.startswith("@"):
+        if len(state.output) < 2 or not state.output[-2].endswith('>'):
+            state.printnlog('<br>')
         s = State()
         out = []
+        comment = ''
+        if '@' in a[1:]:
+            a, comment = a.rsplit('@', maxsplit=1)
         for exp0 in a[1:].split('='):
-            paired = make_paired_tokens(scan(exp0))
+            paired, comment2 = make_paired_tokens(scan(exp0))
+            if comment2 and not comment:
+                comment = comment2
+            elif comment:
+                comment = comment + comment2
             expression = create_Python_expression(paired, s, free_expression = True)
-            print(expression)
+            #print('math:', expression)
             x = eval(expression)
             x.setdepth()
             out.append(x.steps(-1,quantities.latex_writer,subs=latex_subs))
-        state.printnlog('<div style="font-size: 15pt;"> \\[%s\\]<br></div>' % ' = '.join(out))
-    else:
-        formatted = markup_comments(a[1:])
-        state.printnlog('<div style="font-size: 12pt; font-family: ''Trebuchet MS'', sans-serif;">%s</div>' % formatted)
+        raw = a[1:] +'\\n'
+        state.printnlog('''<div style="font-size:12pt; text-align: center;"><span onclick="insertAtCaret('commands','%s', '0')"> \\(%s\\)</span>&nbsp;&nbsp;%s</div>'''
+                        % (raw, ' = '.join(out), comment))
+        return
+    result = markup_comments(a)
+    state.printnlog(result)
 
+import re
 
-def markup_comments(line):
-    """
+def chemeq_addlinks(text):
+    species = re.split('(->|<=>| \+)', text)
+    species.append('')
+    answer = []
+    for s, sep in zip(species[0::2], species[1::2]):
+        s = s.strip()
+        stoich = 1
+        for i, c in enumerate(s):
+            if not c.isdigit():
+                name = s[i:].strip()
+                break
+            digit = int(c)
+            if i:
+                stoich = 10 * stoich + digit
+            else:
+                stoich = digit
+        insert = 'ν[%s] = %d\\n' % (name, stoich)
+        answer.append('''<span onclick="insertAtCaret('commands','%s', '0')">\\(\\ce{%s}\\)</span>\\(\\ce{%s}\\)''' % (insert, s, sep))
+    return ''.join(answer)
 
-    :param line: String containing the comment
-    :return: String with variables and chemistry marked-up in LateX
-    """
-    #return line
-    if '!' not in line:
-        line = ' '.join(autodetect(word) for word in line.split())
-        #print(line)
-    charlist = list(line)
-    interpretation = []
-    while charlist:
-        if charlist[0] == "!":
-            if interpretation and interpretation[-1].endswith('( '):
-                interpretation[-1] = interpretation[-1][:-2] + '('
-            interpretation.append(consume_formula(charlist))
-            continue
-        if charlist[0] == "{" and not interpretation:
-            interpretation.append(consume_image(charlist))
-            continue
-        if charlist[0] == "_":
-            if not interpretation or interpretation[-1][-1] == ' ':
-                interp = consume_identifier(charlist)
-                if interp:
-                    interpretation.append(interp)
-                    continue
-        interpretation.append(consume_comment(charlist))
-    return "".join(interpretation)
-
-
-def consume_image(charlist):
-    cl2 = []
-    charlist.pop(0)
-    while charlist:
-        c = charlist.pop(0)
-        if c == "}":
-            break
-        cl2.append(c)
-    return '<img src=%s>' % "".join(cl2)
-
-
-def consume_comment(charlist):
-    cl2 = []
-    while 1:
-        c = charlist.pop(0)
-        if c == " " and cl2 and cl2[-1] == ' ':
-            cl2.append("&nbsp;")
-        else:
-            cl2.append(c)
-        if not charlist or charlist[0] in "!_":
-            break
-    return "".join(cl2).replace('( ', '(')
-
-
-def consume_identifier(charlist):
-    cl2 = []
-    charlist.pop(0)
-    while charlist:
-        if charlist[0] == " ":
-            charlist.pop(0)
-            break
-        cl2.append(charlist.pop(0))
-    space = '' if charlist and charlist[0] in '.,?)' else ' '
-    return "\\(%s\\)" % latex_name("".join(cl2)) + space
-
-
-def format_identifier(name):
-    return consume_identifier(["_"] + list(name))
-
-
-def consume_formula(charlist):
-    #print(''.join(charlist))
-    cl2 = []
-    charlist.pop(0)
-    while charlist:
-        c = charlist.pop(0)
-        if c == " ":
-            break
-        cl2.append(c)
-    space = '' if charlist and charlist[0] in '.,?)' else ' '
-    return '\\(\\ce{%s}\\)' % "".join(cl2) +  space
-
-
-elements = {'Tb', 'Na', 'Hs', 'Ir', 'Tl', 'Fl', 'Sm', 'Rn', 'As', 'Sb', 'Es', 'Hf', 'I',
-            'La', 'Cm', 'Fm', 'Nb', 'P', 'Ga', 'Li', 'Os', 'Rg', 'In', 'No', 'Db', 'Ti',
-            'Ta', 'Lv', 'S', 'Cl', 'Cd', 'Lr', 'Po', 'Cn', 'Si', 'Fr', 'Er', 'Cf', 'Br',
-            'Pu', 'Xe', 'W', 'C', 'Sn', 'Pd', 'Re', 'Uup', 'Zn', 'Gd', 'K', 'Dy', 'Rf',
-            'F', 'Ra', 'Rh', 'Kr', 'Cs', 'Sg', 'Ac', 'Bi', 'Y', 'Ru', 'Pm', 'Th', 'Sr',
-            'Np', 'Mt', 'Mg', 'H', 'Hg', 'Se', 'Yb', 'Co', 'Ce', 'Cr', 'Zr', 'Ag', 'Uuo',
-            'Ar', 'Al', 'B', 'Pr', 'Pa', 'Ho', 'Pb', 'Fe', 'Pt', 'Uut', 'Ba', 'Rb', 'Bh',
-            'Ne', 'Ni', 'Ge', 'Mn', 'Tm', 'Au', 'Nd', 'Eu', 'At', 'Te', 'Ca', 'Md', 'Bk',
-            'Tc', 'Sc', 'V', 'Cu', 'He', 'Am', 'Uus', 'N', 'O', 'Ds', 'Lu', 'Be', 'Mo', 'U'}
-
-def elementor(t):
-    candidate = []
-    text = t.replace('(aq)', 'Uus').replace('(l)', 'Uus').replace('(s)', 'Uus').replace('(g)', 'Uus')
-    candidate = []
-    textlist = list(text)
-    while textlist:
-        c = textlist.pop(0)
-        if c.isdigit() or c in '+-()^':
-            yield 0.5
-        elif not c.isupper():
-            candidate.append(c)
-            if textlist:
-                continue
-        cc = ''.join(candidate)
-        if cc in elements:
-            yield 1
-        elif cc:
-            yield -len(candidate)/2
-        candidate=[]
-        if c.isupper():
-            candidate = [c]
-    cc = ''.join(candidate)
-    if cc in elements:
-        yield 1
-
-
-def formula_score(text):
-    if text == 'H+':
-        return 1
-    nritems = score = 1
-    elements = 0
-    for u in elementor(text):
-        nritems += abs(u)
-        score += u
-        if u == 1.0:
-            elements += 1
-    if not elements:
-        return 0.0
-    if elements == 1 and not any(c.isdigit() for c in text):
-        return 0.0
-    if score == nritems:
-        return 1.0
-    return score/nritems
-
-def wordscore(text):
-    length = len(text)
-    dings = 0
-    vowel = 0
-    for c in text:
-        if c in "aeiouy":
-            vowel += 1
-        elif c.isdigit():
-            dings = +1
-    for c in text[1:]:
-        if c.isupper():
-            dings += 1
-    if not vowel:
-        dings += 1
-    return max((length - dings)/length-0.1, 0.7)
-
-def symbolscore(text):
-    if '_' in text:
-        return 1.0
-    if '[' in text and ']' in text.split('[')[1]:
-        return 1.0
-    if len(text) == 2 and text[1].isdigit() and not text[0].isdigit():
-        return 0.75
-    return 0.0
-
-def endparen(a):
-    if a[-1] != ')':
-        return False
-    if a.count('(') - a.count(')') == -1:
-        return True
-    return False
-
-def autodetect(b2):
-    a = b2[:]
-    delim = ''
-    frontdelim = ''
-    if a[-1] in '.,?' or endparen(a):
-        delim = a[-1]
-        a = a[:-1]
-        if a and endparen(a):
-            delim = ')' + delim
-            a = a[:-1]
-    if not a:
-        return delim
-    if a[0] == '(' and ')' not in a:
-        frontdelim = '( '
-        a = a[1:]
-    if not a:
-        return frontdelim + delim
-    b = [(formula_score(a), '!'), (wordscore(a), ''), (symbolscore(a), '_')]
-    if a == 'CO':
-        print(b)
-    b.sort(key=lambda x: -x[0])
-    if delim and b[0][1]:
-        delim = ' ' + delim
-    if frontdelim and b[0][1]:
-        frontdelim = '( '
-    return frontdelim + b[0][1] + a + delim
-
-
-def change_flag(flags, name, expression):
-    if expression.strip() != '0':
-        flags.add(name)
-    else:
-        flags.discard(name)
-
+print(chemeq_addlinks('MgCl2 -> Mg2+ + 2 Cl-'))
 
 def deal_with_errors(err, a, state):
     """
@@ -1098,7 +541,7 @@ def deal_with_errors(err, a, state):
             output, _ = show_work(problem[1], "problem", state.flags, error=True)
             state.printit('\n'.join(output))
         state.printit("</div>")
-    elif type(err) is OverflowError:
+    elif type(err) is ZeroDivisionError:
         state.printit("Overflow error, sorry: %s" % a)
     elif type(err) is CalcError:
         if "__tutor__" not in state.flags:
@@ -1107,11 +550,48 @@ def deal_with_errors(err, a, state):
     else:
         raise err
 
+def calc2(command, state=State(), keep_provenance=True):
+    '''
 
-task = '''for i in range(100000): calc("","dd = exp(45.34) / log(6.9654) \\n yy = 87 mg/uL", False)'''
+    :param command:
+    :param state:
+    :return: type, name, q, expression = calc2(line, state)
+    '''
+    quantity = None
+    name = None
+    type_text = 'Calc'
+    try:
+        input_type, name, expression = classify_input(command, state)
+        if input_type == Calculation:
+            name = check_name(name, state)
+            quantity = interpret(expression, state, keep_onthefly=True)
+            if quantity.provenance and any(name == q.name for q in quantity.provenance):
+                print('uhoh')
+            if not quantity.provenance:
+                if quantity.name and not name.startswith('M['):
+                    quantity = Q(number = quantity.number, name='is %s', units = quantity.units, uncert = quantity.uncert, provenance=(quantity,))
+                else:
+                    if quantity.units != Units():
+                        state.popsnuck()
+                    type_text = 'Known'
+            if quantity.name == '-%s' and not quantity.provenance[0].provenance:
+                type_text = 'Known'
+            register_result(quantity.copy(), name, state, keep_provenance=keep_provenance)
+        elif input_type in [ConversionUsing, ConversionIn]:
+            convert_units(input_type, command, name, expression, state)
+            return 'Conversion', None, None, None
+        elif input_type == Unknown:
+            return 'Unknown', name, None, None
+        else:
+            return 'Comment', None, None, None
+    except (CalcError, OverflowError, QuantError) as err:
+        return 'Error', None, None, None
+    return type_text, name, quantity, expression
+
 
 
 def test_examples(math, minex, maxex):
+
     a = 0
     for ex, commands in exdict.items():
         a += 1
@@ -1124,14 +604,17 @@ def test_examples(math, minex, maxex):
             break
         print(a)
         #print('########################################################################')
-        #print(a, '#          %-60s#' % ex)
+        print(a, '#          %-60s#' % ex)
         #print('########################################################################')
         #print (commands)
         try:
-            output, _, memory, _, _, _, _ = calc("", commands, math)
+            if a == 45:
+                gg = 5
+            results, input_log = calc("", commands, math)
         except:
             raise
-        for line in output[1:]:
+        verbose_work, brief_work, m, known, linespace = results
+        for line in verbose_work[1:]:
             pass#print(line)
 
 def profile_program():
@@ -1139,6 +622,8 @@ def profile_program():
 
     memory = ""
     cProfile.run(task)
+
+
 
 
 if __name__ == "__main__":

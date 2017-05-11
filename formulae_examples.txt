@@ -1,0 +1,841 @@
+﻿__allowupdate__ = 1
+
+Chapter 1
+<hr>
+@ρ_sample = m_sample/V_sample #Definition of density
+#@! Priority 3
+m_sample = 5.4343 g
+V_sample = 24.2 mL
+ρ_sample = m_sample/V_sample
+<hr>
+Chapter 2
+<hr>
+@m_element = sum(fraction_isotope m_isotope) # definition of average mass 
+#@! Priority 5
+m[^12C] = 12 Da # mass of one atom of carbon-12 (by definition)
+m[^13C] = 13.0033548378 Da # mass of one atom of carbon-13 (measured)
+abundance[^12C]rel = 0.9893 # fractional abundance of the carbon-12 isotope
+abundance[^13C]rel = 1 - abundance[^12C]rel # fractional abundance of the carbon-13 isotope
+m_carbon = abundance[^12C]rel m[^12C] + abundance[^13C]rel m[^13C] # average mass of carbon atoms in a sample with natural (terrestial) abundance
+<hr>
+Chapter 3
+<hr>
+@N_A = N_particle / n_particle  # definition Avogadro's constant
+#@! Priority 3
+n[CO2] = 2.0 mol
+N_A = 6.022e-23 /mol
+N[CO2] = N_A n[CO2]
+<hr>
+@m[compound] = M[compound] n[compound] # mass vs. chemical amount
+#@! Priority 1
+You can use this if: you know the chemical formula of the compound
+M[CO2] = M[CO2]
+n[CO2] = 1.0 mol
+m[CO2]molecule = M[CO2] n[CO2]
+<hr>
+@m_molecule = M_compound / N_A # mass of a molecule
+#@! Priority 5
+M[CO2] = M[CO2]
+N_A = 6.022e-23 /mol
+m[CO2]molecule = M[CO2] / N_A
+<hr>
+@X_element = m_element / m_compound # composition by mass
+#@! Priority 4
+m_element = 4.1241 g # mass of element occuring in a compound
+m_compound = 56.1334 g
+X_element = m_element / m_compound
+<hr>
+@X_element = m_element / m_compound 100％ # composition by mass in percent
+#@! Priority 4
+m_element = 4.1241 g # mass of element occuring in a compound
+m_compound = 56.1334 g
+X_element = m_element / m_compound 100％
+<hr>
+@molecule/formulaunit = M_molecule/M_empiricalformula = m_molecule/m_empiricalformula # empirical vs molecular formula
+#@! Priority 5
+M[CH2] = M[CH2] # molar mass calculated from empirical formula
+M[C2H4] = M[C2H4] # molar mass measured (or calculated from molecular formula)
+ratio_formulaunits_to_molecule = M[C2H4] / M[CH2] 
+! (A_$x$ B_$y$)_$n$ = A_$nx$ B_$yn$
+<hr>
+@c_solute = n_solute / V_solution # Definition of concentration
+#@! Priority 1
+You can use this if: there is a solution (homogeneous mixture)
+n_solute = 0.513 mol
+V_solution = 0.750 L
+c_solute = n_solute / V_solution
+<hr>
+@c1 V1 = c2 V2 # Dilution law
+#@! Priority 2
+You can use this if: the only thing that happened was adding solvent to a solution
+c1 = 2.00 M
+V1 = 5.00 mL
+V2 = 50.0 mL
+c2 = c1 (V1 / V2)
+<hr>
+@fraction_bymass = m_solute / m_solution # definition concentration as mass fraction
+#@! Priority 4
+m_solute = 0.741 g
+m_solution  = 100. g
+fraction_bymass = m_solute / m_solution
+<hr>
+@fraction_bymass = m_solute / m_solution 100 ％ # definition concentration as mass fraction in percent
+#@! Priority 3
+m_solute = 0.741 g
+m_solution  = 100. g
+fraction_bymass = m_solute / m_solution 100 ％
+<hr>
+@fraction_byvolume = V_solute / V_solution 100 ％ # definition concentration as volume fraction
+#@! Priority 4
+V_solute = 0.741 L
+V_solution  = 100. L
+fraction_byvolume = V_solute / V_solution 100 ％
+<hr>
+@fraction_byvolume = V_solute / V_solution # definition concentration as volume fraction in percent
+#@! Priority 3
+V_solute = 0.741 L
+V_solution  = 100. L
+fraction_byvolume = V_solute / V_solution
+<hr>
+@ppm = 1/1000000 # definition ppm
+#@! Priority 3
+<hr>
+@ppb = 1.e-9 # definition ppb
+#@! Priority 3
+<hr>
+Chapter 4
+<hr>
+@ n1 = ν n2 # Stoichiometric ratio (shortcut)
+#@! Priority 1
+You can use this if: you have a balanced chemical equation describing the reaction at hand
+You can use this if: n1 and n2 refer to chemical amounts that reacted
+n1 = 1.73 mol
+ν = 2
+n2 = n1 ν 
+<hr>
+@ n1/ν1 = n2/ν2 # Stoichiometric ratio (general)
+#@! Priority 1
+You can use this if: you have a balanced chemical equation describing the reaction at hand
+You can use this if: n1 and n2 refer to chemical amounts that reacted
+n1 = 1.43 mol
+ν1 = 2
+ν2 = 3
+n2 = n1/ν1 ν2
+<hr>
+@N_atoms = coeff subscript # Counting atoms in formula or chemical equation
+#@! Priority 3
+! 2 NH3
+coeff = 2
+subscript = 2
+N_H = coeff subscript
+<hr>
+@Charge_species = sum(N_atom * Ox_atom) #Sum of oxidation number
+#@! Priority 2
+! SO4^2-
+Ox[S] = +6
+N[S] = 1
+Ox[O] = -2
+N[O] = 4
+Charge[SO4^2-] = N[S] Ox[S] +  N[O] Ox[O]
+<hr>
+@ n[->] = min(n_reactant/ν_reactant, ...) # Limiting reactant, based on chemical amounts
+#@! Priority 1
+You can use this if: you know the amount of all the reactants
+! 2 H2 + O2 -> 2H2O
+n[H2] = 3.18 mol # chemical amount of hydrogen molecules (dihydrogen)
+ν[H2] = 2 # stoichiometric coefficent of hydrogen molecules
+n[O2] = 0.53 mol # chemical amount of oxygen molecules (dioxygen)
+ν[O2] = 1 # stoichiometric coefficent of oxygen molecules
+n[->] = min(n[H2] / ν[H2], n[O2] / ν[O2])
+<hr>
+@n_theoretical_yield = n[->] ν[product] # calculating theoretical yield (based on chemical amount)
+#@! Priority 2
+n[->] = 0.53 mol # maximal chemical amount of reaction
+ν[H2O] = 2 # stoichiometric coefficient of water
+n[H2O]theoretical = n[->] ν[H2O] # mass of product that theoretically can be obtained 
+<hr>
+@m_theoretical_yield = n[->] ν[product] M[product] # calculating theoretical yield (by mass)
+#@! Priority 2
+n[->] = 0.53 mol # maximal chemical amount of reaction
+ν[H2O] = 2 # stoichiometric coefficient of water
+M[H2O] = M[H2O] # molar mass of water
+m[H2O]theoretical = n[->] ν[H2O] M[H2O] # mass of product that theoretically can be obtained 
+<hr>
+@yield_rel = n_actual / n_theoretical * 100％ # Calculating percent yield from amounts
+#@! Priority 2
+n[H2O]theoretical = 1.06 mol
+n[H2O]actual = 0.95 mol
+yield_rel = n[H2O]actual / n[H2O]theoretical * 100％
+<hr>
+@yield_rel = m_actual / m_theoretical * 100％ # Calculating percent yield from masses
+#@! Priority 2
+m[H2O]theoretical = 19.57 g
+m[H2O]actual = 18.35 g
+yield_rel = m[H2O]actual / m[H2O]theoretical * 100％
+<hr>
+Chapter 5
+<hr>
+@ q = c_p_sample m_sample ΔT  # heat from temperature change
+#@! Priority 4
+c_P[H2O] = 4.104 J / (g K)
+m[H2O] = 451. g 
+ΔT = 3.15 K
+q = c_P[H2O] m[H2O] ΔT
+<hr>
+@ q =  c_p_sample m_sample (T_final - T_initial) # heat from temperature change 2
+#@! Priority 4
+c_P[H2O] = 4.104 J / (g K)
+m[H2O] = 451.g 
+T_final = 298.15 K
+T_initial = 273.15 K
+q = c_P[H2O] m[H2O] (T_final - T_initial)
+<hr>
+@ ΔU = q + w # First law of thermodynamics
+#@! Priority 3
+q_black_box = 2.43 kJ
+w_black_box = -5.15 kJ
+ΔU_black_box = q_black_box + w_black_box
+<hr>
+@ ΔH_reaction = sum(n_prod ΔH_f_prod) - sum(n_react ΔH_f_react) # Enthalpy from heats of formation
+#@! Priority 3
+!3NO2(g) +H2O(l) -> 2HNO3(aq) +NO(g)
+ΔHf°[HNO3(aq)] = -207.4kJ/mol
+ΔHf°[NO(g)] = 90.2 kJ/mol
+ΔHf°[NO2(g)] = 33.2 kJ/mol
+ΔHf°[H2O(l)] = -285.8kJ/mol
+ν[HNO3(aq)] = 2
+ν[NO(g)] = 1
+ν[NO2(g)] = 3
+ν[H2O(l)] = 1
+ΔH°_rxn = sum(ΔHf°[HNO3(aq)] ν[HNO3(aq)], ΔHf°[NO(g)] ν[NO(g)]) - sum(ν[NO2(g)] ΔHf°[NO2(g)], ν[H2O(l)]  ΔHf°[H2O(l)]) 
+<hr>
+Chapter 6
+<hr>
+@c0 = λ ν # Relationship of wavelength and frequency of light
+#@! Priority 4
+λ[Na] = 589. nm
+c0 = 2.998e8 m/s
+ν[Na] = c0 / λ[Na]
+<hr>
+@E_photon = h_Planck ν # Photon: Energy vs frequency
+#@! Priority 3
+ν_neon = 4.684e14 /s
+h_Planck = 6.626e-34 J s
+E_photon = h_Planck ν_neon
+<hr>
+@E_photon = h_Planck λ / c0 # Photon: Energy vs wavelength
+#@! Priority 5
+λ[Na] = 589. nm
+c0 = 2.998e8 m/s
+h_Planck = 6.626e-34 J s
+E_photon = h_Planck c0 / λ[Na]
+<hr>
+@ 1/λ = R_∞ (1/n1^2 - 1/n2^2) # wave number of light associated with bound electron changing state
+#@! Priority 4
+n1 = 1 # low energy quantum state
+n2 = 3 # high energy quantum state
+R_∞ = 1.0973731534e7 /m # Rydberg constant of wave number
+λ = 1 / (R_∞ (1/n1^2 - 1/n2^2)) # wave length
+<hr>
+@E_n = -k Z^2/n^2 # energy of bound electron
+#@! Priority 5
+k = 2.179e-18 J
+Z = 1 # charge of nucleus
+n = 3 # principal quantum number
+E_n = -k Z^2/n^2
+<hr>
+@ΔE = k Z^2 (1/n1^2 - 1/n2^2) # change of energy of bound electron
+#@! Priority 4
+k = 2.179e-18 J
+Z = 1 # charge of nucleus
+n1 = 1 # initial quantum number
+n2 = 4 # final quantum number
+ΔE = k Z^2 (1/n1^2 - 1/n2^2)
+<hr>
+@λ_deBroglie = h_Planck / (m_particle v_particle)
+#@! Priority 5
+h_Planck = 6.626e-34 J s
+m_particle = 5.0 g
+v_particle = 104. m/s
+λ_deBroglie = h_Planck / (m_particle v_particle)
+<hr>
+Chapter 7
+<hr>
+@charge_formal = ⋕e_outer_freeatom - ⋕e_lonepairs - 1/2 ⋕e_bonding # Definition of formal charge
+#@! Priority 3
+For the carbon in carbondioxide with the following Lewis structure
+!O=C=O
+⋕e_outer_freeatom = 4
+⋕e_lonepairs = 0
+⋕e_bonding = 8
+charge_formal = ⋕e_outer_freeatom - ⋕e_lonepairs - 1/2 ⋕e_bonding
+<hr>
+@D[X-Y] = ΔH_bonddissociation # Definition of bond energy
+#@! Priority 3
+! XY(g) -> X(g) + Y(g) !ΔH_bonddissociation = 331.2 kJ/mol
+ΔH_bonddissociation = 331.2 kJ/mol
+D[X-Y] = ΔH_bonddissociation
+<hr>
+@ΔH_reaction_estimate = sum(D_bonds_broken) - sum(D_bonds_formed) # Estimating reaction enthalpy from bond energies
+#@! Priority 5
+! 2H2 + O2 -> 2H2O
+D[H-H] = 436. kJ/mol
+D[O=O] = 498. kJ/mol
+D[O-H] = 464. kJ/mol
+ΔH_reaction_estimate = 2 D[H-H] + D[O=O] - 4 D[O-H]
+<hr>
+@ΔH_lattice = C_ ((Z⁺))((Z⁻))/ R0 # lattice energy
+#@! Priority 5
+describes the reaction
+!MX(s) -> M^{n+}(g) + X^{n-}(g)
+<hr>
+Chapter 8:
+<hr>
+@order_bond = (⋕e_bonding - ⋕e_antibonding)/2 # definition bond order
+#@! Priority 3
+⋕e[O2]_bonding = 6
+⋕e[O2]_antibonding = 2
+order_bond[O2] = (⋕e[O2]_bonding - ⋕e[O2]_antibonding)/2
+<hr>
+Chapter 9:
+<hr>
+@P = F/A_ # Definition of pressure
+#@! Priority 5
+A_ = 1.0 cm^2
+F = 0.32 N
+P = F/A_
+<hr>
+@P_hydrostatic = h_ ρ_fluid g0 # Hydrostatic pressure
+#@! Priority 5
+g0 = 9.81 m/s^2
+ρ_fluid = 0.998 g/mL
+h_ = 10.0 m
+P_hydrostatic = h_ ρ_fluid g0 + 0 atm
+<hr>
+@P V_gas = n R T # Ideal gas law
+#@! Priority 1
+You can use this if: the sample is a -duh- gas
+R = 8.314 J/(mol K)
+n = 0.53 mol
+T = 298.15 K
+P = 1.00 atm
+V_gas = n R T / P
+<hr>
+@P_total = sum(P_partial) # Additivity of partial pressure
+#@! Priority 3
+P[N2] = 4.7 atm 
+P[O2] = 1.3 atm
+P_total = P[N2] + P[O2]
+<hr>
+@X_A = n_A / n_total # definition of mole fraction
+#@! Priority 3
+n[N2] = 4.0 mol
+n_total = 5.0 mol
+X[N2] = n[N2] / n_total
+<hr>
+@P_A = X_a P_total # partial pressure from mole fraction
+#@! Priority 4
+P_total = 1.0 atm
+X[N2] = 0.79
+P[N2] = X[N2] P_total
+<hr>
+@rate_diffusion = n_gas_area / Δt # definition of rate of diffusion
+#@! Priority 5
+Δt = 1.0 min
+n_gas = 2.3 mol
+rate_diffusion = n_gas / Δt
+<hr>
+@rate_effusion_A / rate_effusion_B = sqrt(m_B / m_A) = sqrt(M_B / M_A) # molar mass dependence of rate of effusion
+#@! Priority 5
+rate_effusion[N2] = 3.9 mol/min
+M[N2] = M[N2]
+M[He] = M[He]
+rate_effusion[He]  = sqrt(M[N2] / M[He]) rate_effusion[N2]
+<hr>
+@u_rms = sqrt((u1^2 + u2^2 + u3^2 + u4^2 ...)/n) # definition of rms particle speed
+#@! Priority 5
+<hr>
+@E_kin_avg = 3/2 R T # average molar kinetic energy of particle at given temperature
+#@! Priority 3
+R = 8.314 J/(mol K)
+T = 298.15 K
+E_kin_avg = 3/2 R T
+<hr>
+@u_rms = sqrt(2 E_kin_avg N_A / m_particle) = sqrt(3 R T / M_particle) # velocity of gas particle
+#@! Priority 5
+M[N2] = M[N2]
+R = 8.314 J/(mol K)
+T = 298.15 K
+u_rms = sqrt(3 R T / M[N2])
+<hr>
+@Z = V_molar_measured/V_molar_ideal = P V_molar_measured / (R T) # non-ideality of gas
+#@! Priority 5
+<hr>
+@(P + n^2 a /V_gas^2) (V_gas - n b) = n R T # non-ideal gas law
+#@! Priority 5
+
+<hr>
+Chapter 10:
+<hr>
+@h_liq = 2 T_surface cos(θ) / (r_tube ρ_liq g0) # surface tension
+#@! Priority 5
+h_liq = 2.0 mm
+θ = 0.02
+r_tube = 3.00 mm
+ρ_liq = 0.988 g/mL
+g0 = 9.81 m/s^2
+T_surface = h_liq r_tube ρ_liq g0 / (2 cos(θ))
+<hr>
+@P_vapor = A_ exp(-ΔH_vap /(R T)) # temperature dependence of vapor pressure
+#@! Priority 4
+R = 8.314 J/(mol K)
+T = 298.15 K
+A_ = 0.152 atm
+ΔH_vap = 3.24 kJ/mol 
+P_vapor = A_ exp(-ΔH_vap /(R T))
+<hr>
+@ln(P_vapor) = -ΔH_vap /(R T) + ln(A_) # temperature dependence of vapor pressure (log)
+#@! Priority 5
+R = 8.314 J/(mol K)
+T = 298.15 K
+A_ = 0.152 atm
+ΔH_vap = 3.24 kJ/mol 
+P_vapor = A_ exp(-ΔH_vap /(R T))
+<hr>
+@ln(P_vapor_2 / P_vapor_1) = -ΔH_vap /R (1/T1 - 1/T2) # temperature dependence of vapor pressure (two point)
+#@! Priority 4
+<hr>
+@n λ = 2d_ sin(θ) # Braggs law
+#@! Priority 5
+θ = 0.01
+d_ = 1.00e-10 m
+λ = 2d_ sin(θ)
+<hr>
+Chapter 11:
+<hr>
+@C_g = k P_g # dunno
+#@! Priority 5
+<hr>
+@P_A = X_A P°_A # Raoult's law
+#@! Priority 4
+X_A = 0.20
+P°_A = 0.142 atm
+P_A = X_A P°_A
+<hr>
+@P_vapor_solution = sum(P_vapor_i) = sum(X_i P°_i) # additivity of vapor pressure
+#@! Priority 5
+X_EtOH = 0.20
+X_MeOH = 0.80
+P°_EtOH = 0.3 atm
+P°_MeOH = 0.4 atm
+P_vapor_solution = X_EtOH P°_EtOH + X_MeOH P°_MeOH
+<hr>
+@P_vapor_solution = X_solvent P°_solvent # solvent vapor pressure
+#@! Priority 5
+X_solvent = 0.954
+P°_solvent = 0.1342 atm
+P_vapor_solution = X_solvent P°_solvent 
+<hr>
+@ΔT_boil_solution = K_boil b_solute # boiling point elevation
+#@! Priority 4
+ΔT_boil_solution = 0.412 K
+b_solute = 0.31 mol/kg
+K_boil = ΔT_boil_solution / b_solute
+<hr>
+@ΔT_freeze_solution = K_freeze b_solute # freezing point depression
+#@! Priority 4
+ΔT_freeze_solution = 0.612 K
+b_solute = 0.31 mol/kg
+K_freeze = ΔT_freeze_solution / b_solute
+<hr>
+@Π_solution = c_solute R T # osmotic pressure
+#@! Priority 5
+R = 8.314 J/(mol K)
+T = 298.15 K
+c_solute = 24.3 mM
+Π_solution = c_solute R T
+<hr>
+Chapter 12:
+<hr>
+@ Δc1 = ν Δc2 # Stoichiometric ratio of concentration changes (shortcut)
+#@! Priority 1
+You can use this: if both species are in the same solution (e.g. homogeneous equilibrium)
+Δc1 = 1.73 M
+ν = 2
+Δc2 = Δc1 ν 
+<hr>
+@ Δc_1/ν1 = Δc_2/ν2 # Stoichiometric ratio of concentration changes (general)
+#@! Priority 1
+You can use this: if both species are in the same solution (e.g. homogeneous equilibrium)
+Δc_1 = 1.43 mol
+ν1 = 2
+ν2 = 3
+Δc_2 = Δc_1/ν1 ν2
+<hr>
+@rate = -(1/a) (Δc[A]/Δt) = (1/b) (Δc[B]/Δt) #Definition of reaction rate
+#@! Priority 4
+!2 NO2 -> 1 N2O4
+ν[NO2] = 2
+ν[N2O4] = 1
+Δc[NO2] = -0.34 mM
+Δt = 1s
+Δc[N2O4] = -ν[N2O4]/ν[NO2] Δc[NO2]
+<hr>
+@rate = k c[A]^m_ c[B]^n ... # Definition of rate constant (not in book)
+#@! Priority 4
+m_ = 1
+n = 0
+c[A] = 0.423 M
+c[B] = 1.02 M
+k = 1.42 /(M s)
+rate = k c[A]^m_ c[B]^n
+<hr>
+@[A] = -k_zero t + [A]0 # Zero order integrated rate law
+#@! Priority 4
+[A]0 = 5.4 mM
+t = 1.0 s
+k_zero = 0.45 mM / s
+[A] = -k_zero t + [A]0
+<hr>
+@t_½ = [A]0 / (2 k_zero) # half life zero order reaction
+#@! Priority 5
+[A]0 = 5.4 mM
+k_zero = 0.45 mM / s
+t_½ = [A]0 / (2 k_zero)
+<hr>
+@[A] = [A]0 exp(- k_first t) # First order integrated rate law
+#@! Priority 3
+[A]0 = 5.4 mM
+t = 1.0 s
+k_first = 0.45 / s
+[A] = [A]0 exp(- k_first t)
+<hr>
+@ln([A]/[A]0) = - k_first t # First order integrated rate law (ln)
+#@! Priority 4
+[A]0 = 5.4 mM
+t = 1.0 s
+k_first = 0.45 / s
+[A] = [A]0 exp(- k_first t)
+<hr>
+@t_½ = 0.693/k_first # half life first order reaction
+#@! Priority 5
+k_first = 0.45 / s
+t_½ = 0.693/k_first
+<hr>
+@1/[A] = k_second t + 1/[A]0 # second order integrated rate law
+#@! Priority 5
+k_second = 0.102 /(M s)
+t = 1.0 s
+[A]0 = 5.4 mM
+[A] = 1 / (k_second t + 1/[A]0)
+<hr>
+@t_½ = 1 / ([A]0 k_second) # half life second order reaction
+#@! Priority 5
+k_second = 0.102 /(M s)
+[A]0 = 5.4 mM
+t_½ = 1 / ([A]0 k_second)
+<hr>
+@k = A_ exp(- E_a / (R T)) # Arrhenius equation
+#@! Priority 4
+E_a = 51.3 kJ/mol
+R = 8.314 J/(mol K)
+T = 298.15 K
+A_ = 4.5e9 /(s M)
+k = A_ exp(- E_a / (R T))
+<hr>
+@ln(k1 / k2) = E_a/R (1/T2 - 1/T1) #Arrhenius equation, two point
+#@! Priority 3
+R = 8.314 J/(mol K)
+T1 = 298.15 K
+k1 = 3.11 /s
+T2 = 308.15 K
+k2 = 6.11 /s
+E_a = ln(k1 / k2) R / (1/T2 - 1/T1)
+<hr>
+Chapter 13:
+<hr>
+@[solute] = c[solute] / c°[solute] # thermodynamic concentration of solutes (~ activity)
+#@! Priority 1
+You can use this if: you want to do equilibrium (e.g. pH) calculations
+c[solute] = 0.251 M
+c°[solute] =  1 M  # standard concentration for solutes
+[solute] = c[solute] / c°[solute]
+<hr>
+@[pure] = 1 # thermodynamic concentration of pure substances
+#@! Priority 3
+[pure] = 1
+<hr>
+@Q_c = [C]^x [D]^y ... /([A]^m_ [B]^n ...) #Definition of reaction quotient based on [solute]
+#@! Priority 1
+You can use this: if you have a balanced chemical equation of the reaction at hand
+!m A + n B <=> x C + y D
+[A] = 0.50
+m_ = 1
+[B] = 0.30
+n = 2
+[C] = 0.15
+x = 2
+[D] = 0.55
+y = 1
+Q =  [C]^x [D]^y /([A]^m_ [B]^n )
+<hr>
+@Q_P = P[C]^x P[D]^y /(P[A]^m_ P[B]^n) #Definition of reaction quotient based on partial pressures
+#@! Priority 4
+P[A] = 0.50 atm
+m_ = 1
+P[B] = 0.30 atm
+n = 2
+P[C] = 0.15 atm	
+x = 2
+P[D] = 0.55 atm
+y = 1
+Q_P = P[C]^x P[D]^y /(P[A]^m_ P[B]^n)
+<hr>
+@P_gas = c R T #converting pressure to concentration
+#@! Priority 5
+R = 8.314 J/(mol K)
+T = 298.15 K
+c = 45.3 mM
+P_gas = c R T
+<hr>
+@K_P = K_c (R T)^Δ⋕species #converting K_P to K_c
+#@! Priority 5
+R = 8.314 J/(mol K)
+T = 298.15 K
+K_c = 104.1
+Δ⋕species = 2
+K_P = K_c (R T)^Δ⋕species
+<hr>
+Chapter 14:
+<hr>
+@K_w_25°C = [H3O+][OH-] = 1.0e-14 #Definition of equilibrium constant of water (auto-dissociation)
+#@! Priority 1
+You can use this: if the system is at room temperature
+K_w_25°C = 1.0e-14
+[H3O+] = 1.e-7
+[OH-] = K_w_25°C / [H3O+]
+<hr>
+@pH = -log([H3O+]) #Definition of pH
+#@! Priority 1
+[H3O+] = 1.0e-7
+pH = -log([H3O+])
+<hr>
+@pOH = -log([OH-]) #Definition of pOH
+#@! Priority 4
+[OH-] = 1.e-7
+pOH = -log([OH-])
+<hr>
+@[H3O+] = 10^-pH #Definition of pH v2
+#@! Priority 1
+pH = 7.0
+[H3O+] = 10^-pH
+<hr>
+@[OH-] = 10^-pOH #Definition of pOH v2
+#@! Priority 4
+pOH = 7.0
+[OH-] = 10^-pOH
+<hr>
+@pH + pOH = pK_w_25°C = 14.00 # Sum of pH and pOH 
+#@! Priority 4
+pK_w_25°C = 14.00
+pH = 5.0
+pOH = pK_w_25°C - pH
+<hr>
+@K_a = [H3O+][A-]/[HA] # Definition of acid dissociation constant
+#@! Priority 2
+[H3O+] = 1.5e-5
+[A-] = 1.5e-5
+[HA] = 3.5e-5
+K_a = [H3O+][A-]/[HA]
+<hr>
+@K_b = [HB+][OH-]/[B] # Definition of base "dissociation" constant
+#@! Priority 4
+[HB+] = 1.5e-5
+[OH-] = 1.5e-5
+[B] = 3.5e-5
+K_b = [HB+][OH-]/[B]
+<hr>
+@ionized_rel = [H3O+]eq/[HA]0 100％ # Definition of degree of ionization
+#@! Priority 5
+[H3O+]eq = 1.5e-5
+[HA]0 = 2.0e-4
+[H3O+]eq/[HA]0 100％
+<hr>
+@pK_a = -log(K_a) # Definition of pK_a
+#@! Priority 2
+K_a = 5.2e-9
+pK_a = -log(K_a)
+<hr>
+@pK_b = -log(K_b)# Definition of pK_b
+#@! Priority 4
+K_b = 2.2e-6
+pK_b = -log(K_b)
+<hr>
+@pH = pK_a + log([A-]/[HA]) #Buffer equation (Henderson Hasselbalch)
+#@! Priority 3
+pK_a = 8.75
+[A-] = 3.0mM
+[HA] = 30. mM
+pH = pK_a + log([A-]/[HA])
+<hr>
+Chapter 15:
+<hr>
+@K_sp = [M^{m+}]^p [X^{n-}]^q # definition solubility product
+#@! Priority 5
+!M_{P}X_{Q}(s) <=> pM^{m+}(aq) + qX^{n-}(aq)
+<hr>
+Chapter 16:
+<hr>
+@ΔS = q_rev / T #Definition of entropy (macroscopic, classical thermodynamics)
+#@! Priority 4
+T = 298.15 K
+q_rev = -45.3 kJ
+ΔS = q_rev / T
+<hr>
+@S = k ln(W_) # Definition of entropy (microscopic, statistical thermodynamics)
+#@! Priority 4
+k = 1.38064852e-23 J/K
+W_ = 1e34
+S = k ln(W_)
+<hr>
+@ΔS = k ln(W_final/W_initial) # Definition of entropy (microscopic, statistical thermodynamics), two point
+#@! Priority 5
+k = 1.38064852e-23 J/K
+W_final = 1e34
+W_initial = 1e25
+ΔS = k ln(W_final/W_initial)
+<hr>
+@ΔS° = ΔS°_298 = sum(ν_prod S°_298_prod) - sum(ν_react S°_298_react) # Entropy of formation
+#@! Priority 2
+! N2O4 -> 2 NO2
+S°[NO2] = 34.5 J/(mol K)
+ν[NO2] = 2
+S°[N2O4] = 64.5 J/(mol K)
+ν[NO2] = 1
+ΔS° = S°[NO2] ν[NO2] - S°[N2O4] ν[NO2]
+<hr>
+@ΔS_univ = ΔS_sys + ΔS_surr = ΔS_sys + q_surr/T # Second law of thermodynamics elaborated
+#@! Priority 4
+ΔS_sys = 45.2 J/(mol K)
+ΔS_surr = -65.3 J/(mol K)
+ΔS_univ = ΔS_sys + ΔS_surr
+<hr>
+@ΔG = ΔH - T ΔS # Definition of Gibbs free energy (written for constant temperature)
+#@! Priority 4
+ΔH = -52.4 kJ/mol
+T = 298.15 K
+ΔS = 12.1 J/(mol K)
+ΔG = ΔH - T ΔS
+<hr>
+@ΔG = ΔG° + R T ln(Q) # concentration dependence of Gibbs free energy
+#@! Priority 3
+ΔG° = 13.1 kJ/mol
+R = 8.314 J/(mol K)
+T = 298.15 K
+Q = 1.75e-40
+ΔG = ΔG° + R T ln(Q)
+<hr>
+@ΔG° = - R T ln(K_eq) # Gibbs energy from equilibrium constant
+#@! Priority 2
+K_eq = 4.2e17
+R = 8.314 J/(mol K)
+T = 298.15 K
+ΔG° = - R T ln(K_eq)
+<hr>
+Chapter 17:
+<hr>
+@E°_cell = E°_cathode - E°_anode # Standard cell potential from half cell potentials
+#@! Priority 4
+E°_cathode = 1.34 V
+E°_anode = 0.98 V
+E°_cell = E°_cathode - E°_anode
+<hr>
+@E°_cell = R T/(z F) ln(K_) # Standard cell potential from equilibrium constant
+#@! Priority 4
+K_eq = 4.2e17
+R = 8.314 J/(mol K)
+T = 298.15 K
+F = 96485.3329 s A / mol
+z = 2
+E°_cell = R T/(z F) ln(K_eq)
+<hr>
+@E°_cell_298 = 0.0257 V/z ln(K_) = 0.0592 V/z log(K_) # Standard cell potential from equilibrium constant, room temp version
+#@! Priority 5
+z = 2
+K_eq = 4.2e17
+E°_cell_298 = 0.0592 V/z log(K_eq)
+<hr>
+@E_cell = E°_cell - R T/(z F) ln(Q) # Nernst equation
+#@! Priority 4
+Q = 152.3 # empty battery, mostly products
+R = 8.314 J/(mol K)
+T = 298.15 K
+F = 96485.3329 s A / mol
+z = 2
+E°_cell =  1.32 V
+E_cell = E°_cell - R T/(z F) ln(Q)
+<hr>
+@E_cell_298 = E°_cell -  0.0257 V/z ln(Q) = E°_cell -  0.0592 V/z log(Q) # Nernst equation, room temp
+#@! Priority 5
+Q = 152.3
+E°_cell =  1.32 V
+z = 2
+E_cell_298 = E°_cell -  0.0592 V/z log(Q)
+<hr>
+@ΔG = -z F E_cell #Gibbs free energy from cell potential
+#@! Priority 4
+F = 96485.3329 s A / mol
+z = 2
+E_cell =  1.32 V
+ΔG = -z F E_cell
+<hr>
+@ΔG° = -z F E°_cell # Standard Gibbs free energy from standard cell potential
+#@! Priority 3
+F = 96485.3329 s A / mol
+z = 2
+E°_cell =  1.32 V
+ΔG° = -z F E°_cell
+<hr>
+@w_ele = w_max = -n F E_cell # Relationship between maximal work and cell potential
+#@! Priority 4
+F = 96485.3329 s A / mol
+n = 2.0 mol
+E_cell =  1.32 V
+w_ele = -n F E_cell
+<hr>
+@Q = I t = n F # Charge vs electrical current vs amount of electrons
+#@! Priority 5
+n = 2.0 mol
+F = 96485.3329 s A / mol
+Q = n F
+Chapter 18: representative elements main group
+
+Chapter 19: transition metals
+
+Chapter 20: orgo
+
+<hr>
+Chapter 21:
+<hr>
+@E = m0 c0^2 # Einstein's mass vs energy
+#@! Priority 5
+m_electron = 9.109e-31 kg
+c0 = 2.998e8 m/s
+E_electron = m_electron c0^2
+<hr>
+@rate_decay = λ N_ # definition of decay rate
+#@! Priority 4
+N_ = 3.5e12
+λ = 2.3e13 / s
+rate_decay = λ N_
+<hr>
+@t_½ = ln(2)/λ = 0.693/λ # half life of radioactive decay
+#@! Priority 4
+λ = 2.3e13 / s
+t_½ = ln(2)/λ
+<hr>
+@rem = RBE rad # definition of rem
+#@! Priority 5
+<hr>
+@Sv = RBE Gy # definition of sievert
+#@! Priority 5
