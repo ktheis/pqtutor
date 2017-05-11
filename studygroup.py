@@ -100,6 +100,10 @@ def pumpit(hwid, inputlog, oldsymbols, reset=False):
         pump = -1
     if commands[1] == ':' and commands[0] in 'BLCQ':
         commands = '{"ico/%s.jpg" width ="50" style="display: inline"}' % commands[0] + commands[2:]
+
+        if 'I check out this table' in commands:
+            link = 'I check out this <a href="./units%s" target="_blank">table</a>' % hwid[2:].split('.')[0]
+            commands = commands.replace('I check out this table', link)
         if 'mathematical equation' in commands:
             link = '<a href="./formulae%s" target="_blank">mathematical equation</a>' % hwid[2:].split('.')[0]
             commands = commands.replace('mathematical equation', link)
