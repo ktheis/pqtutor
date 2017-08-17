@@ -1,6 +1,6 @@
 # coding=utf-8
 from quantities import functions, known_units
-from html import escape
+from html import escape, unescape
 from database import exhtml, exdict
 
 selector = '''
@@ -53,7 +53,7 @@ def helpform(mob=None):
 def newform(result, oldlog, inputlog,
             browser=None, actualpref='', prefill="",
             action='.', button2=' Save ', otherbuttons=('export', 'help', 'reset'),
-            show_top=False):
+            show_top=False, hints=''):
     '''
 
     :param result: calculated results from user input - (verboselog, brieflog, memory, known, linespace)
@@ -72,16 +72,17 @@ def newform(result, oldlog, inputlog,
     if not action:
         show_top = True
     verboselog, brieflog, memory, known, linespace = result
-    log = oldlog.replace('"', '&quot;') + "\n" + brieflog.replace('"', '&quot;')
-    out = oldlog.replace('&quot;', '"') + verboselog
-    memory = memory.replace('"', '&quot;')
-    inputlog = inputlog.replace('"', '&quot;')
+    log = escape(oldlog, quote=True) + "\n" + escape(brieflog, quote=True)
+    out = unescape(oldlog) + verboselog
+    memory = escape(memory, quote=True)
+    inputlog = escape(inputlog, quote=True)
+    hints = escape(hints, quote=True)
 
     # assemble widgets
     keyb = "" if browser else 'class="keyboardInput"'
     selectors = quant_selectors(known)
     selectors = selectors + unit_selector + function_selector + symbol_selector
-    obut_text = ''.join('<input type="submit" name = "sub" value="{}" />\n'.format(but) for but in otherbuttons)
+    obut_text = ''.join('<input type="submit" name = "sub" value="%s" />\n' % but for but in otherbuttons)
     rows = 3
     if prefill and prefill in exdict:
         prefill = exdict[prefill][:-2]
@@ -90,11 +91,11 @@ def newform(result, oldlog, inputlog,
         prefill  = actualpref
         rows = max(3, len(prefill.split("\n")), len(prefill) // 80)
     logo = '' if verboselog else PQlogo
-    linespace = "100%"
+    #linespace = "100%"
 
     data = dict(output=out, memory=memory, rows=rows, selectors=selectors, logbook=log, keyboard=keyb,
                 prefill=prefill, head=head, buttons=buttons, linespacing=linespace, logo=logo,
-                inputlog=inputlog, action=action, button2=button2, obut_text=obut_text)
+                inputlog=inputlog, action=action, button2=button2, obut_text=obut_text, hints=hints)
     if show_top:
         data['head'] = head_noscroll
         return template_noninteractive % data
@@ -332,6 +333,7 @@ width="115" height="76">
 
 template = '''<html>
 %(head)s
+<body>
 
     %(logo)s
     <div style="line-height:%(linespacing)s">
@@ -352,13 +354,15 @@ template = '''<html>
             <input type="hidden" name="memory" value = "%(memory)s"/>
             <input type="hidden" name="inputlog" value = "%(inputlog)s"/>
             <input type="hidden" name="logbook" value = "%(logbook)s"/>
+            <input type="hidden" name="hints" value = "%(hints)s"/>
+</form>
 </body>
 </html>
 '''
 
 template_noninteractive = '''<html>
 %(head)s
-
+<body>
     %(logo)s
     <div style="line-height:%(linespacing)s">
 
@@ -397,6 +401,7 @@ template_oneline = '''<html>
             <input type="hidden" name="memory" value = "%(memory)s"/>
             <input type="hidden" name="inputlog" value = "%(inputlog)s"/>
             <input type="hidden" name="logbook" value = "%(logbook)s"/>
+            </form>
 
 </body>
 </html>

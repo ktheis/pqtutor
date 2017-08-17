@@ -2,9 +2,9 @@ import quantities
 from quantities import Q, X, Units, QuantError, latex_name, unitquant
 from re import UNICODE, match
 from fractions import Fraction
+from chemistry import molar_mass
 
 class CalcError(ArithmeticError): pass
-
 
 def interpret(t, state, warning=True, keep_onthefly=False):
     '''
@@ -64,7 +64,10 @@ def interpret(t, state, warning=True, keep_onthefly=False):
     Q(5.0, '%s * %s', Units(), 0.2, set([]), (Q(2.0, units=Units(), uncert=0.0), Q(2.5, 'a', Units(), 0.1)))
     '''
 
+    identity = None
     paired, comment = make_paired_tokens(scan(t))
+    if len(paired) == 2 and paired[0][0] == 'I' and paired[0][1] == '*':
+        identity = paired[0][2]
     try:
         expression = create_Python_expression(paired, state, warning=warning, keep_onthefly=keep_onthefly)
 ################ EVAL EVAl EVAL #######################
@@ -74,6 +77,9 @@ def interpret(t, state, warning=True, keep_onthefly=False):
         q.comment = comment
         if type(q) != Q:
             raise CalcError('<div style="color: red;">misused comma? %s</div><br>' % expression)
+        if identity and identity in state:
+            q.name = '%s'
+            q.provenance = state[identity],
         return q
     except OverflowError as duh:
         raise CalcError('<br>%s<br><br><div style="color: red;">Math overflow (thanks, Jonas): %s</div><br>' % (t, duh))
@@ -161,6 +167,20 @@ def scan_it(text):
     #rint(answer)
     return answer, text
 
+def scan_comment(text):
+    answer = []
+    while text:
+        for pattern in [re_comment, re_operator, re_float, re_identifier]:
+            m = match(pattern[1], text)
+            if m:
+                p = pattern[0]
+                break
+        else:
+            break
+        answer.append((p, text[m.start(): m.end()]))
+        text = text[m.end():]
+    #rint(answer)
+    return answer, text
 
 """
 operator: one or more of the following: | ,()/*^+-|
@@ -242,6 +262,7 @@ def make_paired_tokens(raw_tokens, comma_error = True):
         tokens.append([ttype, operator.replace("^", "**"), ttext])
     return fixfractions(tokens), comment
 
+
 def fixfractions(tokens):
     newtokens = []
     while tokens:
@@ -317,7 +338,7 @@ def create_Python_expression(paired_tokens, state, free_expression = False, warn
     '''
 
     result = []
-    iscalculation = any(x[0]=='I' for x in paired_tokens)
+    iscalculation = any(x[0]=='I' for x in paired_tokens) or (sum(1 for x in paired_tokens if x[0] =='N') > 1)
     complaint = '__tutor__' in state.flags and iscalculation and any(x[0]=='U' for x in paired_tokens)
     while True:  # consume "Z", "I", "F", "U", "N" in paired_tokens
         ttype, operator, ttext = paired_tokens.pop(0)
@@ -356,7 +377,7 @@ def create_Python_expression(paired_tokens, state, free_expression = False, warn
             result.append(quant[0])
             if keep_onthefly and iscalculation:
                 q = Q(ttext)
-                #print (f'added {q} to state ({repr(q)}')
+                print('added {} to state ({})'.format(q, repr(q)))
                 #print(result)
                 state.addsnuck(q)
             continue
@@ -365,8 +386,10 @@ def create_Python_expression(paired_tokens, state, free_expression = False, warn
                state.printit('<div style="color: green;">Warning: Unit without number %s</div><br>'% ttext)
             else:
                 print('Unit without number: ' + ttext)
-        quant_text, paired_tokens, operator = \
-            interpret_N_U_cluster(quant, paired_tokens, complaint, operator, result, state, keep_onthefly = keep_onthefly)
+        quant_text, paired_tokens, operator = interpret_N_U_cluster(quant, paired_tokens, complaint,
+                                                                    operator, result, state,
+                                                                    keep_onthefly=keep_onthefly,
+                                                                    iscalculation=iscalculation)
         result.append('%s%s' % (operator, quant_text))
     expression = "".join(result)[:-1]
     if expression.endswith('*'):
@@ -377,7 +400,7 @@ def create_Python_expression(paired_tokens, state, free_expression = False, warn
         return expression[1:]
     return expression
 
-def interpret_N_U_cluster(quant, orig_paired, complaint, operator, result, state, keep_onthefly = False):
+def interpret_N_U_cluster(quant, orig_paired, complaint, operator, result, state, keep_onthefly=False, iscalculation=False):
     '''
     Find quantity introduced on the fly and evaluate as Q(). This is done to avoid cluttering the output with
     trivial calculations such as 2 * mol / L = 2 mol/L. This step also has consequences for order of operation, as
@@ -472,8 +495,9 @@ def interpret_N_U_cluster(quant, orig_paired, complaint, operator, result, state
 
     q.name = ""
     q.provenance = []
-    if keep_onthefly:
+    if keep_onthefly and iscalculation and (q.units != Units() or q.uncert or q.number not in {1, -1, 2, -2, 3, -3, Fraction(1, 2), Fraction(-1, 2)}):
         state.addsnuck(q)
+        print('Added {} to state ({})'.format(q, repr(q)))
     return repr(q), paired[end:], operator
 
 def crashtest():
@@ -540,77 +564,11 @@ def magic(numberstring):
     four = "%04d" % int("".join(str((d + quer) % 10) for d in dig[-4:]))
     return four in endings
 
-atomic_weights = {'H': '1.008', 'He': '4.002602(2)', 'Li': '6.94', 'Be': '9.0121831(5)', 'B': '10.81', 'C': '12.011',
-                  'N': '14.007', 'O': '15.999', 'F': '18.998403163(6)', 'Ne': '20.1797(6)', 'Na': '22.98976928(2)',
-                  'Mg': '24.305', 'Al': '26.9815385(7)', 'Si': '28.085', 'P': '30.973761998(5)', 'S': '32.06',
-                  'Cl': '35.45', 'Ar': '39.948(1)', 'K': '39.0983(1)', 'Ca': '40.078(4)', 'Sc': '44.955908(5)',
-                  'Ti': '47.867(1)', 'V': '50.9415(1)', 'Cr': '51.9961(6)', 'Mn': '54.938044(3)', 'Fe': '55.845(2)',
-                  'Co': '58.933194(4)', 'Ni': '58.6934(4)', 'Cu': '63.546(3)', 'Zn': '65.38(2)', 'Ga': '69.723(1)',
-                  'Ge': '72.630(8)', 'As': '74.921595(6)', 'Se': '78.971(8)', 'Br': '79.904', 'Kr': '83.798(2)',
-                  'Rb': '85.4678(3)', 'Sr': '87.62(1)', 'Y': '88.90584(2)', 'Zr': '91.224(2)', 'Nb': '92.90637(2)',
-                  'Mo': '95.95(1)', 'Tc': '97.', 'Ru': '101.07(2)', 'Rh': '102.90550(2)', 'Pd': '106.42(1)',
-                  'Ag': '107.8682(2)', 'Cd': '112.414(4)', 'In': '114.818(1)', 'Sn': '118.710(7)', 'Sb': '121.760(1)',
-                  'Te': '127.60(3)', 'I': '126.90447(3)', 'Xe': '131.293(6)', 'Cs': '132.90545196(6)',
-                  'Ba': '137.327(7)', 'La': '138.90547(7)', 'Ce': '140.116(1)', 'Pr': '140.90766(2)',
-                  'Nd': '144.242(3)', 'Pm': '145.', 'Sm': '150.36(2)', 'Eu': '151.964(1)', 'Gd': '157.25(3)',
-                  'Tb': '158.92535(2)', 'Dy': '162.500(1)', 'Ho': '164.93033(2)', 'Er': '167.259(3)',
-                  'Tm': '168.93422(2)', 'Yb': '173.045(10)', 'Lu': '174.9668(1)', 'Hf': '178.49(2)',
-                  'Ta': '180.94788(2)', 'W': '183.84(1)', 'Re': '186.207(1)', 'Os': '190.23(3)', 'Ir': '192.217(3)',
-                  'Pt': '195.084(9)', 'Au': '196.966569(5)', 'Hg': '200.592(3)', 'Tl': '204.38', 'Pb': '207.2(1)',
-                  'Bi': '208.98040(1)', 'Po': '209.', 'At': '210.', 'Rn': '222.', 'Fr': '223.', 'Ra': '226.',
-                  'Ac': '227.', 'Th': '232.0377(4)', 'Pa': '231.03588(2)', 'U': '238.02891(3)', 'Np': '237.',
-                  'Pu': '244.', 'Am': '243.', 'Cm': '247.', 'Bk': '247.', 'Cf': '251.', 'Es': '252.', 'Fm': '257.',
-                  'Md': '258.', 'No': '259.', 'Lr': '262.', 'Rf': '267.', 'Db': '270.', 'Sg': '269.', 'Bh': '270.',
-                  'Hs': '270.', 'Mt': '278.', 'Ds': '281.', 'Rg': '281.', 'Cn': '285.', 'Nh': '286.', 'Fl': '289.',
-                  'Mc': '289.', 'Lv': '293.', 'Ts': '293.', 'Og': '294.'}
 
-def matching_closing(text):
-    p = 1
-    for i, c in enumerate(text):
-        if c == '(':
-             p += 1
-        if c == ')':
-            p -= 1
-            if not p:
-                return i
-    return None
+if __name__ == '__main__':
+    class BareState(dict):
+        def __init__(self):
+            self.flags = set()
 
-def chunks(text):
-    tx = text[:]
-    while tx:
-        if tx[:2] in atomic_weights:
-            e = tx[:2]
-            tx = tx[2:]
-        elif tx[0] in atomic_weights:
-            e = tx[0]
-            tx = tx[1:]
-        elif tx[0] == '(':
-            p = matching_closing(tx[1:])
-            e = tx[:p+1]
-            tx = tx[p+2:]
-        else:
-            raise CalcError('molar mass gone wrong', tx)
-        if not tx or not tx[0].isdigit():
-            nr = 1
-        else:
-            digs = ''
-            while tx and tx[0].isdigit():
-                digs += tx[0]
-                tx = tx[1:]
-            nr = int(digs)
-        yield e, nr
 
-def molar_mass(text):
-    M = Q()
-    tx = text[:]
-    for element, nr in chunks(tx):
-        if element.startswith('('):
-            #rint (nr, '* (', end='')
-            M += Q(nr) * molar_mass(element[1:])
-            #rint (')', end='+')
-        else:
-            M += Q(nr) * Q(atomic_weights[element]) * unitquant['g'] / unitquant['mol']
-            #rint(nr, '*', element, end='+')
-    M.provenance = set()
-    M.name = 'M[%s]' % text
-    return M
+    print(repr(interpret('4.53 g/mol', BareState())))

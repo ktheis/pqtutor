@@ -1,4 +1,48 @@
-from mathparser import interpret, scan_it, make_paired_tokens, create_Python_expression, scan
+"""
+comments.py
+
+Everything to find math and chemistry in comments, mark it up and add links
+
+Call tree:
+
+create_comment
+    displayed_chemical_equation
+    displayed_algebra
+    markup_comment
+        markup_math
+            split_at_equal
+            left_of_equal
+            right_of_equal
+                symbolish
+            scan_comment
+            markup_all_but_math
+            -> create_Python_expression, make_paired_tokens, scan
+        markup_all_but_math
+            autodetect
+                endparen
+                equal_score
+                wordscore
+                symbolscore
+                scinot_score
+                int_score
+                formula_score
+                    elementor
+            format_image
+            mysplit3
+            format_natural_language
+            -> latex_name, latex_number
+         split_at_equal
+         autodetect...
+         mysplit2
+         format_image...
+extract_knowns
+     -> scan_it, interpret
+
+"""
+
+from mathparser import interpret, scan, scan_it, scan_comment, make_paired_tokens, \
+    create_Python_expression
+from chemistry import PSE, typical_units_reverse
 import quantities
 from quantities import Q, X, unitquant, Units, latex_name, latex_number, latex_writer
 #import calculator # access to State
@@ -10,6 +54,8 @@ class BareState(OrderedDict):
     def __init__(self, memory=None, mob=None):
         OrderedDict.__init__(self)
         self.flags = set()
+    def printit(self, *args, **kwargs):
+        pass
 
 
 '''
@@ -30,71 +76,169 @@ Chemistry: enclose in mhchem tags and hope for the best
 Math: interpret using X()
 
 '''
-def markup_comments(line):
-    #rint('mark', line)
+
+def create_comment(a, state):
+    """
+
+    :param a: user input
+    :param state: contains known quantities as ordered dict, along with flags and output
+    :return: none (comment is written to state)
+    """
+    if 'plain math' in state.flags:
+        result = a
+    elif a.startswith("!"):
+        result = displayed_chemical_equation(a, state)
+    elif a.startswith("#"):
+        result = '<span style="font-size:12pt;">%s</span>' % a[1:]
+    elif a.startswith("@"):
+        result = displayed_algebra(a, state)
+    else:
+        result = markup_comment(a)
+    state.printnlog(result)
+
+
+def displayed_algebra(a, state):
+    if len(state.output) < 2 or not state.output[-2].endswith('>'):
+        state.printnlog('<br>')
+    out = []
+    comment = ''
+    if '@' in a[1:]:
+        a, comment = a.rsplit('@', maxsplit=1)
+    for exp0 in a[1:].split('='):
+        comment = format_math(comment, exp0, out)
+    raw = a[1:] + '\\n'
+    cl = clickable(raw, ' \\(%s\\)</span>&nbsp;&nbsp;%s' % (' = '.join(out), comment))
+    return '<div style="font-size:12pt; text-align: center;">%s</div>' % cl
+
+
+def format_math(comment, exp0, out):
+    if not exp0.strip():
+        out.append('')
+        return
+    paired, comment2 = make_paired_tokens(scan(exp0))
+    expression = create_Python_expression(paired, BareState(), free_expression=True, warning=False)
+    x = eval(expression)
+    x.setdepth()
+    out.append(x.steps(-1, quantities.latex_writer, subs=latex_subs))
+    return comment + comment2
+
+
+def displayed_chemical_equation(a, state):
+    cond = len(state.output) < 2 or not state.output[-2].endswith('>')
+    if cond:
+        state.printnlog('<br>')
+    add = ''
+    app = ''
     try:
-        return markup_chem(line)
+        first = a[1:].split()[0]
+        if first.startswith('[') and first.endswith(']') and len(first) < 12:
+            a = a[len(first):]
+            add = first[:]
+        if '!' in a[1:]:
+            a, app = a.rsplit('!', maxsplit=1)
+            app = '             ' + app
     except:
-        return(line)
-
-def markup_comments2(line):
-    """
-
-    :param line: String containing the comment
-    :return: String with variables and chemistry marked-up in LateX
-    """
-    #rint('markup', line)
+        add = ''
+        app = ''
+    result = chemeq_addlinks(a[1:])
+    if app:
+        app = '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' + markup_comment(app)
+    return ('''<div style="font-size:12pt; display: flex; justify-content: space-between;"><div>%s</div><div>%s %s</div><div></div></div>''' %
+        (add, result, app))
 
 
-    a = []
-    for word in mysplit3(line):
-        a.extend(autodetect(word))
-    interpretation = []
-    for item in a:
-        if item[0] == "!":
-            interpretation.append('\\(\\ce{%s}\\)' % item[1])
-        elif item[0] == "{":
-            interpretation.append(consume_image(item[1]))
-        elif item[0] == "N":
-            if 'E' in item[1] or 'e' in item[1]:
-                numbertext = '\\(' + latex_number(item[1]) + '\\)'
+def markup_comment(b):
+    try:
+        #separate out into chemical equations and the rest
+        listt = [item for word in split_at_blank(b) for item in autodetect(word)]
+        if any(item[0] == '!' for item in listt):
+            newlist = []
+            formula = ''
+            while listt:
+                current = listt.pop(0)
+                if current[0] == '!':
+                    if not formula and newlist and newlist[-1][0] == 'i':
+                        formula = newlist.pop()[1]
+                    formula = formula + current[1]
+                elif formula and current[0] == 'N':
+                    formula = formula + current[1]
+                elif formula and current[1] == '+ ' and listt and listt[0][0] in '!i':
+                    formula = formula + current[1] + listt.pop(0)[1]
+                else:
+                    if formula:
+                        newlist.append(('!', formula))
+                        formula = ''
+                    newlist.append(current)
+            if formula:
+                newlist.append(('!', formula))
+            listt = newlist[:]
+        newlist = []
+        math = ''
+        #separate math from chemistry, html, and {} image tags
+        while listt:
+            current = listt.pop(0)
+            if current[0] in '!<{':
+                if math:
+                    newlist.append(('.', math))
+                    math = ''
+                newlist.append(current)
             else:
-                numbertext = item[1]
-            interpretation.append('''<span onclick="insertAtCaret('commands','%s', '0')">%s</span>''' % (item[1], numbertext))
-        elif item[0] == "_":
+                math = math + current[1]
+        if math:
+            newlist.append(('.', math))
+        listt = newlist[:]
+        result = []
+        for i, item in enumerate(listt):
+            if item[0] == '<':
+                result.append(item[1])
+            elif item[0] == '{':
+                result.append(format_image(item[1]))
+            elif item[0] == '!':
+                if item[1].endswith(' '):
+                    item = (item[0], item[1][:-1])
+                    blank = ' '
+                else:
+                    blank = ''
+                result.append(clickable(item[1], '\\(\ce{%s}\\)%s' % (item[1], blank)))
+            elif len(list(split_at_equal(item[1]))) > 1:
+                result.append(markup_math(item[1]))
+            else:
+                result.append(markup_all_but_math(item[1]))
+        return ''.join(result)
+    except ZeroDivisionError:
+        return(b)
+
+
+def markup_math(text):
+    comment = []
+    listt = list(split_at_equal(text))
+    for i, block in enumerate(listt):
+        scanned, remainder = scan_comment(block)
+        if scanned and i:
+            RHS = right_of_equal(scanned)
             try:
-                interpretation.append('''<span onclick="insertAtCaret('commands','%s', '0')">\\(%s\\)</span>''' % (item[1], latex_name(item[1])))
-            except:
-                interpretation.append(item[1])
+                out = []
+                for exp0 in LHS, RHS:
+                    format_math('', exp0, out)
+                cl = clickable(LHS + ' = ' + RHS + '\\n', '\\(%s\\)' % ' = '.join(out))
+                comment.append('''<span style="font-size:12pt; text-align: center;">%s</span>''' % cl)
+            except ZeroDivisionError:
+                raise
+        if scanned and i < len(listt) - 1:
+            LHS = left_of_equal(scanned)
         else:
-            interpretation.append(format_comment(item[1]))
-    #rint('interpretation', interpretation)
-    return ''.join(interpretation)
+            LHS = ''
+        if scanned:
+            middle = ''.join(t for o, t in scanned)
+            if middle:
+                comment.append(markup_all_but_math(middle))
+        middle = None
+    if middle:
+        comment.append(markup_all_but_math(middle))
+    return ''.join(comment)
 
 
-
-typicalunits = dict(
-    c=(Units(m=-3, mol=1), "concentration"),
-    E=(Units(kg=1,m=2,s=-2), "energy"),
-    S=(Units(kg=1,m=2,s=-2,mol=-1,K=-1), "molar entropy"),
-    H=(Units(kg=1,m=2,s=-2,mol=-1), "molar enthalpy"),
-    G=(Units(kg=1,m=2,s=-2,mol=-1), "molar Gibbs energy"),
-    V=(Units(m=3), "volume"),
-    m=(Units(kg=1), "mass"),
-    P=(Units(kg=1, m=-1, s=-2), "pressure"),
-    T=(Units(K=1), "absolute temperature"),
-    t=(Units(s=1), "time"),
-    n=(Units(mol=1), "chemical amount"),
-    M=(Units(kg=1, mol=-1), "molar mass"),
-)
-
-typicalunits["["] = (Units(), "activity")
-typicalunits["ρ"] = (Units(kg=1,m=-3), "density")
-typicalunits["ν"] = (Units(s=-1), "frequency")
-typicalunits["λ"] = (Units(m=1), "wavelength")
-
-
-def mysplit2(line):
+def split_at_blank(line):
     openers = '"{<'
     closers = {'{':'}', '"': '"', '<': '>', '[': ']'}
     curword = []
@@ -118,7 +262,110 @@ def mysplit2(line):
     if curword:
         yield ''.join(curword)
 
-def mysplit3(line): # in the absence of equations
+
+def split_at_equal(line):
+    openers = '"{<'
+    closers = {'{':'}', '"': '"', '<': '>', '[': ']'}
+    curword = []
+    closewith = None
+    for c in line:
+        if closewith == c:
+            closewith = None
+        elif not closewith and c in openers and closers[c] in line:
+            closewith = closers[c]
+        if not closewith and c == '=':
+            yield ''.join(curword)
+            curword = []
+        else:
+            curword.append(c)
+    if curword:
+        yield ''.join(curword)
+
+
+def clickable(paste, text):
+    return '''<span onclick="insertAtCaret('commands','%s', '0')">%s</span>''' % (paste, text)
+
+
+def markup_all_but_math(line):
+    """
+
+    :param line: String containing the comment
+    :return: String with variables and chemistry marked-up in LateX
+    """
+    interpretation = []
+    for item in (it for word in split_at_punctuation(line) for it in autodetect(word)):
+        if item[0] == "!":
+            interpretation.append('\\(\\ce{%s}\\)' % item[1])
+        elif item[0] == "{":
+            interpretation.append(format_image(item[1]))
+        elif item[0] == "N":
+            if 'E' in item[1] or 'e' in item[1]:
+                numbertext = '\\(' + latex_number(item[1]) + '\\)'
+            else:
+                numbertext = item[1]
+            interpretation.append(clickable(item[1], numbertext))
+        elif item[0] == "i":
+            numbertext = item[1]
+            if not '.' in numbertext:
+                numbertext = numbertext.rstrip() + '.'
+            interpretation.append(clickable(numbertext, item[1]))
+        elif item[0] == "_":
+            try:
+                delim = ' ' if item[1].endswith(' ') else ''
+                interpretation.append(clickable(item[1], '\\(%s\\)%s' % (latex_name(item[1].rstrip()), delim)))
+            except:
+                interpretation.append(item[1])
+        else:
+            interpretation.append(format_natural_language(item[1]))
+    return ''.join(interpretation)
+
+
+def autodetect(b2):
+    if b2.endswith(' '):
+        trailing_blank = ' '
+        a = b2.rstrip()
+    else:
+        trailing_blank = ''
+        a = b2[:]
+    if b2 and b2[0] in '{[<"':
+        yield (b2[0], b2)
+        return
+    delim = ''
+    frontdelim = ''
+    if not a:
+        yield (' ', ' ')
+        return
+    if a[-1] in '.,?' or endparen(a):
+        delim = a[-1]
+        a = a[:-1]
+        if a and endparen(a):
+            delim = ')' + delim
+            a = a[:-1]
+    if not a:
+        yield (')', delim+trailing_blank)
+        return
+    if a[0] == '(' and ')' not in a:
+        frontdelim = '( '
+        a = a[1:]
+    if not a:
+        yield ('(', frontdelim + delim)
+        return
+    b = [(scinot_score(a), 'N'), (equal_score(a), '='), (int_score(a), 'i'),
+         (formula_score(a), '!'), (wordscore(a), '.'), (symbolscore(a), '_')]
+    if a == 'CO':
+        pass #rint(b)
+    b.sort(key=lambda x: -x[0])
+    if delim:
+        delim = delim + trailing_blank
+        trailing_blank = ''
+    if frontdelim:
+        yield ('(', '(')
+    yield(b[0][1], a+trailing_blank)
+    if delim:
+        yield (')', delim)
+
+
+def split_at_punctuation(line): # in the absence of equations
     openers = '"{<'
     closers = {'{':'}', '"': '"', '<': '>', '[': ']'}
     curword = []
@@ -142,8 +389,9 @@ def mysplit3(line): # in the absence of equations
             elif c == '.' and curword[-1].isdigit and ci < len(line)-1 and line[ci+1] != ' ':
                 curword.append(c)
             else:
+                curword.append(c)
                 yield ''.join(curword)
-                curword = [c]
+                curword = []
         elif curword and curword[0] in ' ?).' and c != ' ':
             yield ''.join(curword)
             curword = [c]
@@ -162,80 +410,30 @@ for line in tests:
 
 
 
-def consume_image(charlist):
-    cl2 = []
-    charlist.pop(0)
-    while charlist:
-        c = charlist.pop(0)
-        if c == "}":
-            break
-        cl2.append(c)
-    return '<img src=%s>' % "".join(cl2)
+def format_image(text):
+    return '<img src=%s>' % text[1:-1]
 
 
-def format_comment(word):
+def format_natural_language(word):
     charlist = list(word)
     cl2 = []
-    while 1:
+    while charlist:
         c = charlist.pop(0)
         if c == " " and cl2 and cl2[-1] == ' ':
             cl2.append("&nbsp;")
         else:
             cl2.append(c)
-        if not charlist or charlist[0] in "!_":
-            break
-    return "".join(cl2).replace('( ', '(')
+    return "".join(cl2)
 
 
-def consume_identifier(charlist):
-    cl2 = []
-    charlist.pop(0)
-    while charlist:
-        if charlist[0] == " ":
-            charlist.pop(0)
-            break
-        cl2.append(charlist.pop(0))
-    space = '' if charlist and charlist[0] in '.,?)' else ' '
-    return "\\(%s\\)" % latex_name("".join(cl2)) + space
 
-
-def format_identifier(name):
-    return consume_identifier(["_"] + list(name))
-
-
-def consume_formula(charlist):
-    #print(''.join(charlist))
-    cl2 = []
-    charlist.pop(0)
-    while charlist:
-        c = charlist.pop(0)
-        if c == " ":
-            break
-        cl2.append(c)
-    space = '' if charlist and charlist[0] in '.,?)' else ' '
-    return '\\(\\ce{%s}\\)' % "".join(cl2) +  space
-
-
-#rint(repr(molar_mass('NaCl')))
-#rint(repr(molar_mass('(NH4)2SO4')))
-
-element_regex = r'[BCFHIKNOPSUVWY]|[ISZ][nr]|[ACELP][ru]|A[cglmst]|B[aehikr]|C[adefl-os]|D[bsy]|Es|F[elmr]|G[ade]|H[efgos]|Kr|L[aiv]|M[cdgnot]|N[abdehiop]|O[gs]|P[abdmot]|R[abe-hnu]|S[bcegim]|T[abcehilms]|Xe|Yb'
-
-elements = {'Tb', 'Na', 'Hs', 'Ir', 'Tl', 'Fl', 'Sm', 'Rn', 'As', 'Sb', 'Es', 'Hf', 'I',
-            'La', 'Cm', 'Fm', 'Nb', 'P', 'Ga', 'Li', 'Os', 'Rg', 'In', 'No', 'Db', 'Ti',
-            'Ta', 'Lv', 'S', 'Cl', 'Cd', 'Lr', 'Po', 'Cn', 'Si', 'Fr', 'Er', 'Cf', 'Br',
-            'Pu', 'Xe', 'W', 'C', 'Sn', 'Pd', 'Re', 'Uup', 'Zn', 'Gd', 'K', 'Dy', 'Rf',
-            'F', 'Ra', 'Rh', 'Kr', 'Cs', 'Sg', 'Ac', 'Bi', 'Y', 'Ru', 'Pm', 'Th', 'Sr',
-            'Np', 'Mt', 'Mg', 'H', 'Hg', 'Se', 'Yb', 'Co', 'Ce', 'Cr', 'Zr', 'Ag', 'Uuo',
-            'Ar', 'Al', 'B', 'Pr', 'Pa', 'Ho', 'Pb', 'Fe', 'Pt', 'Uut', 'Ba', 'Rb', 'Bh',
-            'Ne', 'Ni', 'Ge', 'Mn', 'Tm', 'Au', 'Nd', 'Eu', 'At', 'Te', 'Ca', 'Md', 'Bk',
-            'Tc', 'Sc', 'V', 'Cu', 'He', 'Am', 'Uus', 'N', 'O', 'Ds', 'Lu', 'Be', 'Mo', 'U'}
+'''element_regex = r'[BCFHIKNOPSUVWY]|[ISZ][nr]|[ACELP][ru]|A[cglmst]|B[aehikr]|C[adefl-os]|D[bsy]|Es|F[elmr]|G[ade]|H[efgos]|Kr|L[aiv]|M[cdgnot]|N[abdehiop]|O[gs]|P[abdmot]|R[abe-hnu]|S[bcegim]|T[abcehilms]|Xe|Yb'
+'''
 
 def elementor(t):
-    candidate = []
-    text = t.replace('(aq)', 'Uus').replace('(l)', 'Uus').replace('(s)', 'Uus').replace('(g)', 'Uus')
+    text = t.replace('(aq)', 'Og').replace('(l)', 'Og').replace('(s)', 'Og').replace('(g)', 'Og')
     if text.endswith('-') or text.endswith('+'):
-        text = text[:-1] + 'Am'
+        text = text[:-1] + 'Ts'
     candidate = []
     textlist = list(text)
     while textlist:
@@ -247,7 +445,7 @@ def elementor(t):
             if textlist:
                 continue
         cc = ''.join(candidate)
-        if cc in elements:
+        if cc in PSE:
             yield 1
         elif cc:
             yield -len(candidate)/2
@@ -255,7 +453,7 @@ def elementor(t):
         if c.isupper():
             candidate = [c]
     cc = ''.join(candidate)
-    if cc in elements:
+    if cc in PSE:
         yield 1
 
 
@@ -277,6 +475,7 @@ def formula_score(text):
         return 1.0
     return score/nritems
 
+
 def int_score(text):
     if 'e' in text or 'E' in text:
         return 0.0
@@ -285,6 +484,7 @@ def int_score(text):
         return 1.0
     except:
         return 0.0
+
 
 def scinot_score(text):
     if text[0].isdigit and '.' in text:
@@ -295,10 +495,12 @@ def scinot_score(text):
             pass
     return 0
 
+
 def equal_score(text):
     if text.strip() == '=':
         return 1
     return 0
+
 
 def wordscore(text):
     length = len(text)
@@ -316,6 +518,7 @@ def wordscore(text):
         dings += 1
     return max((length - dings)/length-0.1, 0.7)
 
+
 def symbolscore(text):
     if '_' in text and not '/' in text:
         return 1.0
@@ -327,6 +530,7 @@ def symbolscore(text):
         return 0.75
     return 0.0
 
+
 def endparen(a):
     if a[-1] != ')':
         return False
@@ -334,57 +538,10 @@ def endparen(a):
         return True
     return False
 
-def autodetect(b2):
-    if b2.endswith(' '):
-        trailing_blank = ' '
-        a = b2.rstrip()
-    else:
-        trailing_blank = ''
-        a = b2[:]
-    #rint('pre autodetect:', b2)
-    if b2 and b2[0] in '{[<"':
-        return (b2[0], b2),
-    delim = ''
-    frontdelim = ''
-    if not a:
-        return [(' ', ' '),]
-    if a[-1] in '.,?' or endparen(a):
-        delim = a[-1]
-        a = a[:-1]
-        if a and endparen(a):
-            delim = ')' + delim
-            a = a[:-1]
-    if not a:
-        return (')', delim),
-    if a[0] == '(' and ')' not in a:
-        frontdelim = '( '
-        a = a[1:]
-    if not a:
-        return ('(', frontdelim + delim),
-    b = [(scinot_score(a), 'N'), (equal_score(a), '='), (int_score(a), 'i'),
-         (formula_score(a), '!'), (wordscore(a), '.'), (symbolscore(a), '_')]
-    if a == 'CO':
-        pass #rint(b)
-    b.sort(key=lambda x: -x[0])
-    if delim:
-        delim = delim + trailing_blank
-        trailing_blank = ''
-    result = []
-    if frontdelim:
-        result.append(('(', '('),)
-    result.append((b[0][1], a+trailing_blank),)
-    if delim:
-        result.append((')', delim), )
-    return result
-
-
-a = '''The concentration of CaCl2 in the solution is 1.5e-12 mol/L
-The reaction HOH -> H+ + OH- (aq) proceeds very quickly when NaCl and CuBr2 are heated
-The relation is c = n/V, where n is the chemical amount of solute
-The bla (n0 refers to the ground state) occurs'''.splitlines()
 
 latex_subs = {"%s * %s": "%s \\cdot %s",
-            "%s ^ %s": "{%s}^{%s}",
+            "%s / %s": "\\dfrac{%s}{%s}",
+              "%s ^ %s": "{%s}^{%s}",
             "exp0(%s)": "e^{%s}",
             "exp(%s)": "\\mathrm{exp}(%s)",
             "log(%s)": "\\mathrm{log}(%s)",
@@ -404,178 +561,18 @@ latex_subs = {"%s * %s": "%s \\cdot %s",
             "uncertainty(%s)": "\\mathrm{uncertainty}(%s)",
     }
 
-def markup_math(item):
-    item = item.replace('?', ' ?')
-    out = []
-    mathtext = []
-    rightmath = ''
-    #rint('math:' + item)
-    formatted = ''
-    listt = item.split('=')
-    #rint(listt)
-    for i, block in enumerate(listt):
-        paired, comment = make_paired_tokens(scan(block, count_paren=False), comma_error=False)
-        for j, p in enumerate(paired):
-            if p[0] == 'I':
-                if (wordscore(p[2]) > symbolscore(p[2]) and len(p[2]) != 1):
-                    p[0] = 'W'
-                if p[2] in '?!':
-                    p[0] = 'W'
-        if paired and i:
-            #rint ('left:', paired)
-            left = [paired.pop(0)]
-            if left[0][0] == 'W':
-                left[0] = ('I', left[0][1], left[0][2])
-            while paired:
-                if paired[0][0] != 'W' or paired[0][1] not in '*,':
-                    if paired[0][0] == 'W':
-                        p0, p1, p2 = paired.pop(0)
-                        left.append(['I', p1, p2])
-                    else:
-                        left.append(paired.pop(0))
-                else:
-                    break
-            if left[-1][0] != 'Z':
-                left.append(['Z','*',''])
-            try:
-                exp0 = create_Python_expression(left[:], BareState(), free_expression=True, warning=False)
-                x = eval(exp0)
-                x.setdepth()
-                mathtext.append(x.steps(-1, latex_writer, subs=latex_subs))
-            except (AttributeError, SyntaxError):
-                leftish = left[:-1]
-                leftish.extend(paired)
-                paired = leftish[:]
-        if paired and len(listt) - i > 1:
-            right = [paired.pop()]
-            if paired:
-                right.append(paired.pop())
-            if right[-1][0] == 'W':
-                right[-1] = ('I', right[-1][1], right[-1][2])
-
-            while paired:
-                if paired[-1][0] != 'W' or paired[-1][1] not in '*,':
-                    if paired[0][0] == 'W':
-                        p0, p1, p2 = paired.pop()
-                        right.append(('I', p1, p2))
-                    else:
-                        right.append(paired.pop())
-                else:
-                    break
-            try:
-                if right[-1][1] == ',':
-                    right[-1] = (right[-1][0], '*', right[-1][2])
-                exp0 = create_Python_expression(list(reversed(right)), BareState(), free_expression=True, warning=False)
-                #rint(list(reversed(right)), 'right of block:', exp0)
-                x = eval(exp0)
-                x.setdepth()
-                rightmath = x.steps(-1, latex_writer, subs=latex_subs)
-            except:
-                rightmath = 'trouble with right of = in' + item
-                print('failed right:', list(reversed(right)))
-                print(item)
-                raise
-        if paired: # something remains that is not math
-            if mathtext:
-                out.append('''<span style="font-size: 12pt; color: navy;" onclick="insertAtCaret('commands','%s', '0')">\\(%s\\)</span>''' % (item, ''.join(mathtext)))
-                mathtext = []
-            if paired[-1][0] == 'Z':
-                paired.pop()
-            middle = paired[0][2] + block.split(paired[0][2], maxsplit=1)[1]
-            if right and right[-1][2] == paired[-1][2]:
-                middle = middle.rsplit(paired[-1][2], maxsplit=1)[0]
-            else:
-                middle = middle.rsplit(paired[-1][2], maxsplit=1)[0] + paired[-1][2]
-
-            #rint(middle)
-            out.append(markup_comments2(middle))
-            mathtext = [rightmath]
-            rightmath = ''
-        elif rightmath and not i:
-            mathtext = [rightmath]
-            rightmath = ''
-
-        mathtext.append(' = ')
-    if mathtext and ''.join(mathtext[:-1]):
-        out.append('''<span style="font-size: 12pt; color: navy" onclick="insertAtCaret('commands','%s', '0')">\\(%s\\)</span>''' % (item, ''.join(mathtext[:-1])))
-    return ' '.join(out)
 
 
-def markup_chem(b):
-    #rint(b)
-    listt = []
-    for word in mysplit2(b):
-        listt.extend(autodetect(word))
-    #rint(''.join('%-*s' % (len(a[1]), a[0]) for a in listt))
-    if any(item[0] == '!' for item in listt):
-        newlist = []
-        formula = ''
-        while listt:
-            current = listt.pop(0)
-            if current[0] == '!':
-                if not formula and newlist and newlist[-1][0] == 'i':
-                    formula = newlist.pop()[1]
-                formula = formula + current[1]
-            elif formula and current[0] == 'N':
-                formula = formula + current[1]
-            elif formula and current[1] == '+ ' and listt and listt[0][0] in '!i':
-                formula = formula + current[1] + listt.pop(0)[1]
-            else:
-                if formula:
-                    newlist.append(('!', formula))
-                    formula = ''
-                newlist.append(current)
-        if formula:
-            newlist.append(('!', formula))
-        listt = newlist[:]
-    #rint(''.join('%-*s' % (len(a[1]), a[0]) for a in listt))
-
-
-    newlist = []
-    math = ''
-    while listt:
-        current = listt.pop(0)
-        if current[0] in '!<{':
-            if math:
-                newlist.append(('.', math))
-                math = ''
-            newlist.append(current)
-        else:
-            math = math + current[1]
-    if math:
-        newlist.append(('.', math))
-    listt = newlist[:]
-    #rint(''.join('%-*s' % (len(a[1]), a[0]) for a in listt))
-
-    result = []
-    for i, item in enumerate(listt):
-        if item[0] == '<':
-            result.append(item[1])
-        elif item[0] == '{':
-            result.append(consume_image(list(item[1])))
-        elif item[0] == '!':
-            result.append('''<span style="font-size: 12pt;" onclick="insertAtCaret('commands','[%s]', 0)">\\(\ce{%s}\\)</span>''' % (item[1].rstrip(), item[1]))
-        elif '=' in item[1]:
-            result.append(markup_math(item[1]))
-        else:
-            result.append(markup_comments2(item[1]))
-    return ' '.join(result)
-
-b = 'The concentration of MgCl2 -> Mg^2+ + 2 Cl- is calculated as c[MgCl2] = b * 3.14 mg * n[MgCl2] / V_solution'
-#rint(b)
-#rint(markup_chem(b))
-
-
-task = '''for i in range(100000): calc("","dd = exp(45.34) / log(6.9654) \\n yy = 87 mg/uL", False)'''
-
-typical_units_reverse = {typicalunits[sym][0] :sym for sym in typicalunits}
-typical_units_reverse[Units(mol=1, m=-3)] = '[]'
 
 def extract_knowns(text):
+    """
+    Generator for numerical data in a text
+    :param text: The question text
+    :yield: Commands to set numerical data
+    """
     text = text.replace('<em>M</em>', 'M').\
         replace('×10', ' × 10').replace('−', '-').replace('<sup>', '^').\
         replace('10^', '10 ').replace('</sup>', '')
-    #rint('\n'.join([text[i:i+80] for i in range(0, len(text), 80)]))
     while text:
         tokens, remainder = scan_it(text)
         if remainder and remainder.startswith('='):
@@ -621,10 +618,8 @@ def extract_knowns(text):
             if units:
                 while known and known[-1] in '),.?':
                     known = known[:-1]
-
                 try:
                     q = interpret(known, BareState())
-                    #rint(q)
                     if q.units in typical_units_reverse:
                         yield(typical_units_reverse[q.units] + ' = ' + known)
                     else:
@@ -636,7 +631,116 @@ def extract_knowns(text):
 
 
 
-'''
-for k in extract_knowns('A flask containing 8.0e2 g of water is heated, and the temperature of the water increases from 21 °C to 85 °C. How much heat did the water absorb? T0 = 21 °aC T1 = 85 °aC ΔT = T1 - T0 m[H2O] = 8.0e2 g'):
-    print(k)
-'''
+def symbolish(text):
+    for t in text:
+        if t in '_[0123456789':
+            return True
+    if len(text) == 1 and text not in '.!?,':
+        return True
+    return False
+
+
+def left_of_equal(scanned):
+    LHS = []
+    best = None
+    for i, item in enumerate(reversed(scanned)):
+        if item[0] == 'I' and (not LHS or symbolish(item[1]) or (LHS and LHS[-1][0] == 'O' and LHS[-1][1] != ' ')):
+            LHS.append(item)
+            best = i
+        elif item[0] == 'O':
+            LHS.append(item)
+        else:
+            break
+    if best:
+        del(scanned[-best-1:])
+        return ''.join(item[1] for item in reversed(LHS[:best+1]))
+    return ''
+
+
+def right_of_equal(scanned):
+    RHS = []
+    best = None
+    leftover = None
+    for i, item in enumerate(scanned):
+        if item[0] == 'N' or (item[0] == 'I' and
+                                  (not best or symbolish(item[1]) or (RHS and RHS[-1][0] == 'O' and RHS[-1][1] != ' '))):
+            if item[0] == 'I' and item[1][-1] in '?.':
+                leftover = item[1][-1]
+                item = ('I', item[1][:-1])
+            RHS.append(item)
+            best = i
+            if leftover:
+                break
+        elif item[0] == 'O' and ',' not in item[1]:
+            RHS.append(item)
+        else:
+            break
+    if best:
+        del(scanned[:best+1])
+        if leftover:
+            scanned.append(('.', leftover))
+        return ''.join(item[1] for item in RHS[:best+1])
+    else:
+        return ''
+
+
+import re
+
+
+def chemeq_addlinks(text):
+    if '->' not in text and '<=>' not in text:
+        return clickable('!' + text, '\\(\\ce{%s}\\)' % text)
+    species = re.split(r'(->(?:\[[^]]+\])?|<=>(?:\[[^]]+\])?| \+)', text)
+    species.append('')
+    answer = []
+    for s, sep in zip(species[0::2], species[1::2]):
+        s = s.strip()
+        stoich = 1
+        for i, c in enumerate(s):
+            if not c.isdigit():
+                name = s[i:].strip()
+                break
+            digit = int(c)
+            if i:
+                stoich = 10 * stoich + digit
+            else:
+                stoich = digit
+        if sep.startswith('->') or sep.startswith('<=>'):
+            sep = clickable('!' + text + '\\n', '\\(\\ce{%s}\\)' % sep)
+        else:
+            sep = '''\\(\\ce{ %s }\\)''' % sep.strip()
+        insert = 'ν[%s] = %d\\n' % (name, stoich)
+        answer.append(clickable(insert, '\\(\\ce{%s}\\)' % s) + sep)
+    return ''.join(answer)
+
+
+
+
+if __name__ == '__main__':
+    print(list(split_at_equal('Hello a = b and "c = d" is different')))
+    print(chemeq_addlinks('MgCl2 -> Mg2+ + 2 Cl-'))
+    text = 'This is a test with a = b and other stuff. The new sentence "bla = bla" starts <em>here</em>.'
+    print(text)
+    print('|'.join(split_at_blank(text)))
+    print('|'.join(split_at_equal(text)))
+    print('|'.join(split_at_punctuation(text)))
+
+    a = '''The concentration of calcium chloride, CaCl2, in the solution is 1.5e-12 mol/L
+    The reaction HOH -> H+ + OH- (aq) proceeds very quickly when NaCl and CuBr2 are heated
+    The relation is c = n/V, where n is the chemical amount of solute
+    The bla (n0 refers to the ground state) occurs'''.splitlines()
+    b = 'The concentration of MgCl2 -> Mg^2+ + 2 Cl- is calculated as c[MgCl2] = b * 3.14 mg * n[MgCl2] / V_solution'
+
+    for line in a:
+        print(markup_comment(line))
+
+
+    task = '''for i in range(100000): calc("","dd = exp(45.34) / log(6.9654) \\n yy = 87 mg/uL", False)'''
+
+    print(markup_math('When a0 = b0, c = 4.53 and d = 5.245.'))
+    print(markup_comment('The formula is H2O. The name is water.'))
+
+    for t in split_at_punctuation('. The name is water.'):
+        print(t, list(autodetect(t)))
+
+    print(list(autodetect('. ')))

@@ -14,42 +14,32 @@ Call hierarchy:
     calc(memory, commands, mob):
         class State(OrderedDict):
         classify_input(a, state):
-
+            extract_identifier()
         check_name(sym, state):
-        interpret(t, state):
-            scan(t):
-                identifier(scanner, token):
-                operator(scanner, token):
-                float2(scanner, token):
-                comment(scanner, token):
-            make_paired_tokens(raw_tokens):
-                fixoperator(operator, tokens):
-            create_Python_expression(paired_tokens, state):
-                interpret_N_U_cluster(quant, orig_paired):
-                magic(numberstring):
-            eval(expression)
+        interpret(t, state): -> mathparser.py
         register_result(result0, sym, state):
         show_work(result, sym, flags, error=False, addon="", skipsteps=False):
 
         comments(line):
         convert_units(input_type, command, quant, units, state):
         create_comment(a, state):
-            consume_comment(charlist):
-            consume_identifier(charlist):
-            format_identifier(name):
-            consume_formula(charlist):
+            markup_comment(): -> comments.py
+        create_unknown()
         change_flag(flags, name, expression):
         deal_with_errors(err, a, state):
+    calc2:
+        see calc
 
 
 """
 
 from form import exdict
-from mathparser import CalcError, interpret, make_paired_tokens, scan_it
-from mathparser import check_name, extract_identifier, scan, create_Python_expression
+from mathparser import CalcError, interpret, scan_it
+from mathparser import check_name, extract_identifier
 import quantities
 from quantities import QuantError, Q, X, latex_name, unitquant, Units
-from comments import typicalunits, format_identifier, markup_comments
+from comments import create_comment, markup_comment
+from chemistry import typicalunits, pronounce
 #from mpmath import mpf
 from fractions import Fraction
 #X, Units, Fraction are all for an eval statement
@@ -125,14 +115,14 @@ class State(OrderedDict):
                     self[q.name] = q
 
     def addsnuck(self, q):
-        name = 'Snuck{}'.format(self.snuck)
+        name = 'Snuck%s' % self.snuck
         self.snuck += 1
         self[name] = q
 
     def popsnuck(self):
         if self.snuck > 0:
             self.snuck -= 1
-            name = 'Snuck{}'.format(self.snuck)
+            name = 'Snuck%s' % self.snuck
             del(self[name])
         else:
             pass #raise ZeroDivisionError
@@ -178,7 +168,7 @@ class State(OrderedDict):
             input_log = input_log + '\n'
         verbose_work = '\n'.join(self.output)
         brief_work = '\n'.join(self.logput)
-        linespace = '40%' if '__scrunch__' in self.flags else '100%'
+        linespace = '40%' if '__scrunch__' in self.flags else '120%'
         return (verbose_work, brief_work, m, known, linespace), input_log
 
 
@@ -211,7 +201,7 @@ def classify_input(a, state):
     if not a or not a.strip():
         return Empty, None, None
     #rint('wahh', '\n'.join(state.output[-3:]))
-    if '__tutor__' in state.flags and not a.startswith('__'):
+    if '__newby__' in state.flags and not a.startswith('__'):
         state.printit('<pre style="color:maroon"><b>>>>> %s</b></pre>' % a.replace('<','&lt;').replace('>','&gt;'))
     elif not a.startswith('__'):
         state.printit("<br>" if not '/h' in ''.join(state.output[-1:]) else '')
@@ -242,7 +232,7 @@ def classify_input(a, state):
         return ConversionUsing, a[:start], rest[len('using'):].strip()
     elif m and a[start:].startswith(' in ') and a[:start].strip() in state:
         return ConversionIn, a[:start], rest[len('in'):].strip()
-    if '__tutor__' in state.flags:
+    if '__newby__' in state.flags:
         raise CalcError("Your tutor says: Please come up with a name for the quantity you are calculating")
     try:
         interpret(a, state, warning=False)
@@ -270,7 +260,7 @@ def register_result(result0, sym, state, keep_provenance=False):
     if hasattr(result0,'depth'):
         del result0.depth
     if sym in state and '__allowupdate__' not in state.flags:
-        state.printit('<div style="color: green;">Warning: Updated value of %s</div><br>' % (format_identifier(sym)))
+        state.printit('<div style="color: green;">Warning: Updated value of \\(%s\\)</div><br>' % (latex_name(sym)))
     state[sym] = result0
     if '__fracunits__' not in state.flags:
         for u in result0.units:
@@ -280,8 +270,8 @@ def register_result(result0, sym, state, keep_provenance=False):
         if len(sym) == 1 or sym[1] in "_0123456789[" or sym[0] == "[":
             if sym[0] in typicalunits and result0.units != typicalunits[sym[0]][0]:
                 state.printit(
-                    '<div style="color: green;">Warning: %s looks like a %s, but units are strange</div><br>' % (
-                        format_identifier(sym), typicalunits[sym[0]][1]))
+                    '<div style="color: green;">Warning: \\(%s\\) looks like a %s, but units are strange</div><br>' % (
+                        latex_name(sym), typicalunits[sym[0]][1]))
 
 
 
@@ -289,12 +279,12 @@ latex_subs = {"%s / %s": "\\dfrac{%s}{%s}",
             "%s * %s": "%s \\cdot %s",
             "%s ^ %s": "{%s}^{%s}",
             "exp0(%s)": "e^{%s}",
-            "exp(%s)": "\\mathrm{exp}(%s)",
-            "log(%s)": "\\mathrm{log}(%s)",
-            "ln(%s)": "\\mathrm{ln}(%s)",
-            "sin(%s)": "\\mathrm{sin}(%s)",
-            "cos(%s)": "\\mathrm{cos}(%s)",
-            "tan(%s)": "\\mathrm{tan}(%s)",
+            "exp(%s)": "\\mathrm{exp}【%s】",
+            "log(%s)": "\\mathrm{log}【%s】",
+            "ln(%s)": "\\mathrm{ln}【%s】",
+            "sin(%s)": "\\mathrm{sin}【%s◗",
+            "cos(%s)": "\\mathrm{cos}【%s】",
+            "tan(%s)": "\\mathrm{tan}【%s】",
             "sqrt(%s)": "\\sqrt{%s}",
             "quadn(%s": "\\mathrm{quadn}(%s",
             "quadp(%s": "\\mathrm{quadp}(%s",
@@ -302,7 +292,7 @@ latex_subs = {"%s / %s": "\\dfrac{%s}{%s}",
             "min(%s": "\\mathrm{min}(%s",
             "sum(%s": "\sum (%s",
             "max(%s": "\\mathrm{max}(%s",
-            "abs(%s)": "\\mathrm{abs}(%s)",
+            "abs(%s)": "\\mathrm{abs}【%s】",
             "moredigits(%s)": "\\mathrm{moredigits}(%s)",
             "uncertainty(%s)": "\\mathrm{uncertainty}(%s)",
     }
@@ -326,8 +316,8 @@ def show_work(result, sym, flags, error=False, addon="", skipsteps=False):
     if math:
         writer = quantities.latex_writer
         if not "__latex__" in flags:
-            logput.append('''<span style="color:navy; cursor:pointer; font-size:12pt;" onclick="insertAtCaret('commands','%s ', 0)">''' % sym)
-            output.append('''<span style="color:navy; cursor:pointer; font-size:12pt;" onclick="insertAtCaret('commands','%s ', 0)">''' % sym)
+            logput.append('''<span title='%s' style="color:navy; cursor:pointer; font-size:12pt;" onclick="insertAtCaret('commands','%s ', 0)">''' % (pronounce(sym, result.units), sym))
+            output.append('''<span title='%s' style="color:navy; cursor:pointer; font-size:12pt;" onclick="insertAtCaret('commands','%s ', 0)">''' % (pronounce(sym, result.units), sym))
     else:
         writer = quantities.ascii_writer
     subs = latex_subs if math else None
@@ -342,8 +332,8 @@ def show_work(result, sym, flags, error=False, addon="", skipsteps=False):
     if '__hidenumbers__' in flags:
         task = result.steps(-1, quantities.latex_writer, subs)
     name = latex_name(sym) if math else sym
-    output.append(template1 % (name, task, addon, result.comment))
-    logput.append(template1 % (name, task, addon, result.comment))
+    output.append(template1 % (name, task, addon, markup_comment(result.comment)))
+    logput.append(template1 % (name, task, addon, markup_comment(result.comment)))
     if not skipsteps:
         for dd in range(1, d + 1):
             if dd == 1:
@@ -380,6 +370,7 @@ def convert_units(input_type, command, quant, units, state):
     """
     flags2 = set(i for i in state.flags if i != '__hideunits__')
     if input_type == ConversionUsing:
+        print(repr(state[quant.strip()]))
         if units in ['°ΔC','°aC']:
             prefu = [units]
             q = state[quant.strip()] + Q(0.0)
@@ -395,7 +386,7 @@ def convert_units(input_type, command, quant, units, state):
                 q = state[quant.strip()] + Q(0.0)
             except KeyError:
                 raise CalcError("The quantity '%s' is not defined yet. Check for typos." % quant.strip())
-        q.name = ""
+        q.name = ''
         q.provenance = None
         q.comment = ''
         outp, _ = show_work(q, quant, flags2)
@@ -409,14 +400,15 @@ def convert_units(input_type, command, quant, units, state):
         q.comment = ''
         outp, _ = show_work(q, quant, flags2)
         output.extend(outp[-2 if not 'plain math' in state.flags else -1:])
-        q = state[quant.strip()]
+        q = state[quant.strip()] + Q(0.0)
         q.name = ""
         q.provenance = None
         _, logp = show_work(q, quant, flags2)
         state.printit('\n'.join(output))
         state.logit('\n'.join(logp))
+        print(repr(state[quant.strip()]))
     else:
-        tmp = interpret(units, state)
+        tmp = interpret(units, state, warning=False)
         try:
             qq = state[quant.strip()] / tmp
         except KeyError:
@@ -426,7 +418,7 @@ def convert_units(input_type, command, quant, units, state):
         state.printwork(work)
 
 def create_unknown(sym, state):
-    state.printnlog('''<span style="color:navy; font-size:12pt; cursor:pointer" onclick="insertAtCaret('commands','%s = ', 0)">''' % sym)
+    state.printnlog('''<span title="%s" style="color:navy; font-size:12pt; cursor:pointer" onclick="insertAtCaret('commands','%s = ', 0)">''' % (pronounce(sym), sym))
     state.printnlog("\(%s =\\ ?\)<br>" % latex_name(sym))
     state.printnlog('<br></span>')
 
@@ -436,93 +428,7 @@ def change_flag(flags, name, expression):
     else:
         flags.discard(name)
 
-def create_comment(a, state):
-    """
 
-    :param a: user input
-    :param state: contains known quantities as ordered dict, along with flags and output
-    :return: none (comment is written to state)
-    """
-    if 'plain math' in state.flags:
-        state.printnlog(a)
-        return
-    if a.startswith("!"):
-        cond =  len(state.output) < 2 or not state.output[-2].endswith('>')
-        crit = None if len(state.output) < 2 else state.output[-2]
-        if cond:
-            state.printnlog('<br>')
-        add = ''
-        app = ''
-        try:
-            first = a[1:].split()[0]
-            if first.startswith('[') and first.endswith(']') and len(first) < 12:
-                a = a[len(first):]
-                add = first[:]
-            if '!' in a[1:]:
-                a, app = a.rsplit('!', maxsplit=1)
-                app = '             ' + app
-        except:
-            add = ''
-            app = ''
-        '''<span style="color:navy; cursor:pointer; font-size:12pt;" onclick="insertAtCaret('commands','%s ', 0)">'''
-        result = chemeq_addlinks(a[1:])
-        if app:
-            app = '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' + markup_comments(app)
-        state.printnlog('''<div style="font-size:12pt; display: flex; justify-content: space-between;"><div>%s</div><div>%s %s</div><div></div></div>''' %
-                        (add, result, app))
-        return
-    if a.startswith("#"):
-        state.printnlog('<span style="font-size:12pt;">%s</span>' % a[1:])
-        return
-    if a.startswith("@"):
-        if len(state.output) < 2 or not state.output[-2].endswith('>'):
-            state.printnlog('<br>')
-        s = State()
-        out = []
-        comment = ''
-        if '@' in a[1:]:
-            a, comment = a.rsplit('@', maxsplit=1)
-        for exp0 in a[1:].split('='):
-            paired, comment2 = make_paired_tokens(scan(exp0))
-            if comment2 and not comment:
-                comment = comment2
-            elif comment:
-                comment = comment + comment2
-            expression = create_Python_expression(paired, s, free_expression = True)
-            #print('math:', expression)
-            x = eval(expression)
-            x.setdepth()
-            out.append(x.steps(-1,quantities.latex_writer,subs=latex_subs))
-        raw = a[1:] +'\\n'
-        state.printnlog('''<div style="font-size:12pt; text-align: center;"><span onclick="insertAtCaret('commands','%s', '0')"> \\(%s\\)</span>&nbsp;&nbsp;%s</div>'''
-                        % (raw, ' = '.join(out), comment))
-        return
-    result = markup_comments(a)
-    state.printnlog(result)
-
-import re
-
-def chemeq_addlinks(text):
-    species = re.split('(->|<=>| \+)', text)
-    species.append('')
-    answer = []
-    for s, sep in zip(species[0::2], species[1::2]):
-        s = s.strip()
-        stoich = 1
-        for i, c in enumerate(s):
-            if not c.isdigit():
-                name = s[i:].strip()
-                break
-            digit = int(c)
-            if i:
-                stoich = 10 * stoich + digit
-            else:
-                stoich = digit
-        insert = 'ν[%s] = %d\\n' % (name, stoich)
-        answer.append('''<span onclick="insertAtCaret('commands','%s', '0')">\\(\\ce{%s}\\)</span>\\(\\ce{%s}\\)''' % (insert, s, sep))
-    return ''.join(answer)
-
-print(chemeq_addlinks('MgCl2 -> Mg2+ + 2 Cl-'))
 
 def deal_with_errors(err, a, state):
     """
@@ -544,7 +450,7 @@ def deal_with_errors(err, a, state):
     elif type(err) is ZeroDivisionError:
         state.printit("Overflow error, sorry: %s" % a)
     elif type(err) is CalcError:
-        if "__tutor__" not in state.flags:
+        if "__newby__" not in state.flags:
             state.printit("<pre>\n%s</pre>" % a)
         state.printit(err.args[0])
     else:

@@ -13,15 +13,12 @@ and then do arithmetic with them. The web server is implemented using web.py.
 
 """
 from calculator import calc, State
-print('#'*30, 'calculator')
-from comments import extract_knowns
+from comments import extract_knowns, create_comment
 from form import newform, printableLog, helpform, exdict
-from mathparser import crashtest
-print('#'*30, 'mathparser')
 from database import get_example, get_answer
-from matchup import checkanswer
-from studygroup import pumpit, show_formulae, formula_details, show_quantities
-print('#'*30, 'matchup')
+from exampletracer import grade_answer, generate_hints, generate_tutor_comments
+from chemistry import show_formulae, formula_details, show_quantities
+
 
 @get('/')
 def index_get():
@@ -63,10 +60,6 @@ def index_post():
 @get('/ico/:file')
 def send_ico(file):
     return static_file(file, root='static/')
-
-@get('/icrash')
-def crash_test():
-    return crashtest()
 
 
 @get('/<nr:re:example.*>')
@@ -136,14 +129,23 @@ def cookie_post():
     return newform(result, logbook, inputlog, action='./cookie')
 
 
+hints = None
+
 @get('/<hwid:re:hw.*>')
 def hw(hwid):
+    global hints
+    hints = None
     question = get_example(hwid[2:])
-    answer, followup = get_answer(hwid[2:])
     if not question:
         return "waah, does not exist"
-    print('question', question)
+    if '@@' in question:
+        question, pref = question.split('@@', 1)
+    else:
+        pref = ''
+    answer, followup = get_answer(hwid[2:])
+    #rint('question', question)
     result, good_input = calc('', question)
+
     inputlog = good_input
     logbook = ''
     if hwid.endswith('b'):
@@ -156,41 +158,71 @@ def hw(hwid):
             outp = outp + '<hr>' + '<span title="%s">Think about it...</span>' % followup.splitlines()[0].split('Think about it:')[1]
         result = outp, logp, memory, known, linespace
         return newform(result, logbook, inputlog,
-                       action=hwid, button2='submit', otherbuttons=('export',))
+                       action=hwid, button2='submit', otherbuttons=('export',), actualpref=pref)
     return newform(result, logbook, inputlog,
                    action=hwid, button2='', otherbuttons='', show_top=True)
 
+import json
+from html import escape, unescape
+
+
 @post('/<hwid:re:hw.*>')
 def hw_post(hwid):
-    browser = request.environ.get('HTTP_USER_AGENT').lower()
     oldsymbols = request.forms.get('memory')
     logbook = request.forms.get('logbook')
     inputlog = request.forms.get('inputlog')
+    oldstuff = len(inputlog.splitlines())
+    hints = request.forms.get('hints')
+    if hints:
+        hints = json.loads(unescape(hints))
+    print(oldstuff, inputlog)
     if request.forms.get('sub') == "export":
         allsymbols = State(oldsymbols)
         return printableLog(allsymbols, logbook, inputlog)
     commands = request.forms.get('commands')
     result, good_input, = calc(oldsymbols, commands)
-    #return (verbose_work, brief_work, m, known, linespace), input_log
-    inputlog = inputlog + "\n" + good_input
+    if commands:
+        inputlog = inputlog + "\n" + good_input
     outp, logp, memory, known, linespace = result
+    answer, followup = get_answer(hwid[2:])
+    question = get_example(hwid[2:])
+    student_answer = inputlog[:]
+    for q in question.splitlines():
+        student_answer = student_answer.replace(q+'\r\n', '')
     if request.forms.get('sub') == "submit":
-        answer, followup = get_answer(hwid[2:])
-        grade = checkanswer(inputlog, answer)
+        grade = grade_answer(student_answer, answer, question, hwid)
         if followup:
+            fu = followup.splitlines()
+            followup = fu[0] + '<ul  style="list-style-type:none"><li>' + '</li><br><li>'.join((f if f[1] != '*' else f[:1]+f[2:]) for f in fu[1:]) + '</li></ul>'
             result, good_input, = calc('', followup)
             outp, logp, memory, known, linespace = result
-            return newform((grade+outp, logp, '', '', ''), logbook, inputlog, actualpref='The answer is: ', button2='extra credit?')
+            return newform((grade+outp, logp, '', '', ''), logbook, inputlog, actualpref='The answer is: ', button2='extra credit?', action='yipee')
         return newform((grade, logp, '', '', ''), logbook, inputlog, otherbuttons=('export',))
     if not commands:
-        outp = pumpit(hwid, inputlog, oldsymbols)
-        return newform((outp, '', memory, known, linespace), logbook, inputlog, action=hwid, button2='submit', otherbuttons=('export',))
+        if '__tutor__' in inputlog:
+            outp = 'Tutor says: Please input commands. I will comment but give no hints'
+        else:
+            if not hints:
+                print("Hints for:", hwid)
+                print("Student answer:", student_answer)
+                hints = generate_hints (hwid, student_answer, answer, question)
+                for h in hints:
+                    pass #rint(h)
+                print('done with hints')
+            outp = hints.pop(0)
+            if not hints:
+                hints = [outp]
+            hints = json.dumps(hints)
+        return newform((outp, '', memory, known, linespace), logbook, inputlog, action=hwid, button2='submit', otherbuttons=('export',), hints=hints)
     else:
-        pumpit(0,0,0,reset=True)
+        if '__tutor__' in inputlog and '__tutor__' not in commands:
+            feedback = generate_tutor_comments (hwid, inputlog, oldstuff, answer, question)
+            outp, logp, memory, known, linespace = result
+            return newform((outp + feedback, logp, memory, known, linespace), logbook, inputlog, action=hwid, button2='submit',
+                           otherbuttons=('export',))
+
     return newform(result, logbook, inputlog,
                    action=hwid, button2='submit', otherbuttons=('export',))
-
-import re
 
 @get('/<nr:re:formulae.*>')
 def formula(nr):
@@ -200,28 +232,35 @@ def formula(nr):
             text = formula_details(*nr.split('formulae')[1].split('.'))
             result, good_input = calc('', text)
             outp, logp, memory, known, linespace = result
-            result = logp, logp, memory, known, linespace
+            result = outp, logp, memory, known, linespace
             return newform(result, '', '', action=None, button2='', otherbuttons='',
-                           actualpref="Can't calculate on this page (just paste into main calculation)\n")
+                           actualpref="\n\nClick on formulas to make commands appear here (and then copy into calculator)\n")
         else:
             text = show_formulae(int(nr.split('formulae')[1]))
-    except ValueError:
+    except ZeroDivisionError:
         text = 'No data'
     result, good_input = calc('', text)
     return newform(result, '', '', action=None, button2='', otherbuttons='', show_top=True,
-                   actualpref="Can't calculate on this page (just paste into main calculation)\n")
+                   actualpref="\n\nClick on formulas to make commands appear here (and then copy into calculator)\n")
 
 @get('/<nr:re:units.*>')
 def unit_table(nr):
     response.set_header('X-XSS-Protection', '0')
     try:
-        text = show_quantities(int(nr.split('units')[1]))
-        result, good_input = calc('', text)
+        text = show_quantities(int(nr.split('units')[1]), flashcard=True)
+        s = State()
+        for line in text.splitlines():
+            if line.startswith('@'):
+                create_comment(line, s)
+            else:
+                s.printnlog(line)
     except ValueError:
         result = ('No data',)
-    result = result[0].replace('<br>',''), '', '', '', ''
+    result = '\n'.join(line.replace('<br>','') for line in s.output), '', '', '', ''
     return newform(result, '', '', action=None, button2='', otherbuttons='', show_top=True,
-                   actualpref="Can't calculate on this page (just paste into main calculation)\n")
+                   actualpref="Click on formulas to make commands appear here\n")
 
-#run(host='localhost', port=8080, debug=True)
-application = default_app()
+
+
+run(host='localhost', port=8080, debug=True)
+#application = default_app()

@@ -1,6 +1,4 @@
 # coding=utf-8
-#import mpmath
-#from decorator import decorator
 """
 
 Classes and functions to do arithmetic with physical quantities.
@@ -17,14 +15,6 @@ The online calculator hosted at http:\\\\ktheis.pythonanywhere.com uses this cod
 Author: Karsten Theis (ktheis@westfield.ma.edu)
 """
 import math
-# from mpmath import log10 as math_log10
-# from mpmath import log as math_log
-# from mpmath import exp as math_exp
-# from mpmath import sin as math_sin
-# from mpmath import cos as math_cos
-# from mpmath import tan as math_tan
-# from mpmath import floor
-# from mpmath import sqrt as math_sqrt
 from math import log10 as math_log10
 from math import log as math_log
 from math import exp as math_exp
@@ -34,6 +24,8 @@ from math import tan as math_tan
 from math import floor
 from math import sqrt as math_sqrt
 from fractions import Fraction
+import collections
+import re
 
 SIunit_symbols = ["A", "kg", "m", "s", "mol", "K", "Cd", "$"]
 
@@ -43,6 +35,10 @@ def Units(A=0, kg=0, m=0, s=0, mol=0, K=0, Cd=0, dollar=0):
 
 
 unity = Units()
+
+def prettyU(units):
+    symbols = ["A", "kg", "m", "s", "mol", "K", "Cd", "dollar"]
+    return "Units(" + ",".join("%s=%s" % (x[0], repr(x[1])) for x in zip(symbols, units) if x[1]) + ")"
 
 
 class QuantError(ArithmeticError):
@@ -90,6 +86,8 @@ class Q(object):
             self.prefu = set(prefu)
             if 'M' in prefu:
                 self.prefu.add('L')
+            if 'mol' in prefu:
+                self.prefu.add('M')
             self.uncert = uncert
             self.provenance = provenance
             self.comment = ''
@@ -287,6 +285,10 @@ def addsub(number, name, left, right):
 def muldiv(number, name, units, self, other):
     if number:
         uncert = math_sqrt((self.uncert / self.number) ** 2 + (other.uncert / other.number) ** 2) * abs(number)
+    elif not other.uncert:
+        uncert = self.uncert
+    elif not self.uncert:
+        uncert = other.uncert
     else:
         uncert = 0.0
     if hasattr(number, 'denominator') and number.denominator == 1:
@@ -715,7 +717,6 @@ def number2quantity(text):
         return Q(f, "", uncert=float("1e%s" % expo) * mult)
     return Q(f, "", uncert=0.0)
 
-import re
 
 def latex_name(name):
     """
@@ -746,7 +747,7 @@ def latex_name(name):
                 head = r'\mathrm{%s}' % head
     subscripts = re.findall(r'(\\ce{.*}|[^_]+)_', tail) # tail.split('_') but ignoring underscore within chem mark-up
     if subscripts:
-        if len(subscripts) == 2  and len(subscripts[0]) == 1:
+        if len(subscripts) == 2  and subscripts[1] and (len(subscripts[0]) == 1 or '\\ce{' in subscripts[0]):
             return head + r'_{\mathrm{' + ','.join(subscripts) + '}}'
         return head + r'_{\mathrm{' + '\ '.join(subscripts) + '}}'
     return head
@@ -757,8 +758,6 @@ def inherit_binary(q1, q2):
     provenance = (q1, q2)
     return prefu, provenance
 
-
-import collections
 
 opprio = collections.defaultdict(int)
 opprio["%s ^ %s"] = 5
@@ -899,7 +898,7 @@ def check_argument(f):
 @check_argument
 def qexp(a):
     number = math_exp(a.number)
-    return Q(number, "exp(%s)", a.units, abs(a.uncert * number), a.prefu, (a,))
+    return Q(number, "exp0(%s)", a.units, abs(a.uncert * number), a.prefu, (a,))
 
 
 def qsqrt(a):
@@ -1056,7 +1055,7 @@ class X(object):
                 self.depth = 0
             else:
                 self.depth = 1 + max(child.setdepth() for child in self.provenance)
-                if self.name == "-%s":
+                if self.name == "-%s" or self.name == '%s':
                     self.depth -= 1
         return self.depth
 
