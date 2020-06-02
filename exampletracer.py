@@ -1,4 +1,5 @@
-from chemistry import pronounce, Species, interpret_equation, compare_reactions, physconst, typical_units_reverse, typicalunits, good_units
+from chemistry import pronounce, Species, interpret_equation, compare_reactions
+from chemistry import physconst, typical_units_reverse, typicalunits, good_units, dimension_name, naming_conventions
 from calculator import calc, calc2, State
 from quantities import Units
 from mathparser import scan
@@ -83,44 +84,60 @@ check_answer
 
 
 def generate_hints (hwid, student_answer, model_answer, question):
+    #rint('generating hints')
     try:
         chapter = int(hwid[2].split('.')[0])
     except:
         chapter = 0
-    hints = evaluate_progress(student_answer, model_answer, question, hwid)
-    if not hints or (len(hints) == 1 and ('CO' in hints or 'In' in hints or 'Kn' in hints)):
+    hints, debug_info = evaluate_progress(student_answer, model_answer, question, hwid)
+    if not hints or (len(hints) == 1 and ('CO' in hints or 'In' in hints or 'Kn' in hints or 'Sn' in hints or 'A1n' in hints)):
         hints['A1'] = 'all done'
     output = []
     #rint('*'*60)
     for h in hints:
-        print(h, hints[h])
+        pass #rint(h, hints[h])
     if 'CO' in hints:
         output.append(hint_it(hwid, chapter, 'CO', '', category=hints['CO']))
-    if any(b in hints for b in 'Kw Ii Ipm !b !f A2 B2'.split()):
-        output.append(hint_it(hwid, chapter, 'err', '', category=''))
     for h in hints:
-        if h != 'CO':
+        if h != 'CO' and h != 'Z':
             output.append(hint_it(hwid, chapter, h, '', category=hints[h]))
     output = [f for f in flatten(output)]
+    if any(b in hints for b in 'Kw Ii Ipm !b !f A2 B2'.split()):
+        output.extend(hint_it(hwid, chapter, 'err', '', category=''))
+    if 'Z' in hints:
+        output.extend(hint_it(hwid, chapter, 'Z', '', category=hints['Z']))
     output.extend(hint_it(hwid, chapter, 'z', '', category='arrgh'))
-    return output
+    return output, debug_info
 
 
 def evaluate_progress(student_answer, model_answer, question, hwid, ignore=None):
-    hints = defaultdict(list)
-    model, student, scores = check_knowns(model_answer, question, student_answer, hints, hwid, ignore)
-    if hints and any(h not in {'Ksp', 'Is', 'Ks', 'I', 'Ip', 'CO', 'In'} for h in hints):
-        return hints
-    check_calculations(model, question, student, scores, hints, ignore)
-    if hints and any(h not in {'Ksp', 'Is', 'Ks', 'I', 'Ip', 'CO', 'In'} for h in hints):
-        return hints
+    hints = OrderedDict()
+    model, student, scores, debug_info = check_knowns(model_answer, question, student_answer, hints, hwid, ignore)
+    if hints and any(h not in {'Snu', 'Ksp', 'Kcap', 'Is', 'Ks', 'Is2', 'Ks2', 'Ip', 'CO', 'In', 'Kn', 'Sn', 'Sk'} for h in hints):
+        hints['Z'] = 'Reread the question and look for known quantities'
+        return hints, debug_info
+    debug_info2 = check_calculations(model, question, student, scores, hints, ignore)
+    if debug_info2:
+        debug_info.append(('model', 'student', 'problems with calculations'))
+        debug_info.extend(debug_info2)
+    if False and hints and any(h not in {'Snu', 'Ksp', 'Kcap', 'Is', 'Ks', 'Is2', 'Ks2', 'I', 'Ip', 'CO', 'In', 'Kn', 'Sn', 'Sk'} for h in hints):
+        return hints, debug_info
+    if 'A6b' in hints:
+        return hints, debug_info
     if ignore:
-        return hints
-    next_steps(model, student, question, hints)
-    return hints
+        return hints, debug_info
+    hints2 = OrderedDict()
+    debug_info2 = next_steps(model, student, question, hints2)
+    if debug_info2:
+        debug_info.append(('model', 'student', 'pumps'))
+        debug_info.extend(debug_info2)
+    for h in hints:
+        hints2[h] = hints[h]
+    return hints2, debug_info
 
 
 def check_knowns(model_answer, question, student_answer, hints, hwid, ignore=None):
+    outp = []
     #model_commands = preliminaries(model_answer, student_answer)
     model = collect_inputs(model_answer, question, snuck=False)
     #pprint.print(model)
@@ -128,8 +145,8 @@ def check_knowns(model_answer, question, student_answer, hints, hwid, ignore=Non
     solution_structure(qstore1, cstore1, answers1, context1)
     if not answers1 and cstore1:
         answers1.append([cstore1[-1]])
-    student = collect_inputs(student_answer, question, doubledip=False, snuck=True)
-    _, qstore2, cstore2, _, match2, _ = student
+    student = collect_inputs(student_answer, question, is_student=True, doubledip=False, snuck=True)
+    _, qstore2, cstore2, answers2, match2, _ = student
 
     try:
         chapter = int(hwid[2].split('.')[0])
@@ -143,67 +160,131 @@ def check_knowns(model_answer, question, student_answer, hints, hwid, ignore=Non
         if qstore1[qm].type.startswith('Known_explicit'):
             data = True
             if qm in match1:
-                if scores[qm].numerical < 90:
-                    if scores[qm].number == 3 and scores[qm].units and not scores[qm].uncert:
-                        hints['Is'] = match1[qm]
+                if scores[qm].numerical < 96:
+                    if match1[qm].startswith('Snuck'):
+                        hints['Sk'] = str(qstore2[match1[qm]])
+                    elif scores[qm].number == 3 and scores[qm].units and scores[qm].uncert:
+                        hints['Is' if scores[qm].uncert == 2 else 'Is2'] = match1[qm]
                     elif qstore1[qm].number * qstore2[match1[qm]].number < 0.0:
                         hints['Ipm'] = match1[qm]
                     else:
                         hints['Ii'] = match1[qm]
                 elif scores[qm].name != 2:
-                    hints['In'] = match1[qm]
+                    s = match1[qm][0]
+                    if good_units(s.lower() if s.isupper() else s.upper(), qstore1[qm].units):
+                        hints['Kcap'] = match1[qm]
+                    else:
+                        hints['In'] = match1[qm]
+
+                outp.append((qm, match1[qm], str(scores[qm].numerical)))
             else:
                 missing.append(pronounce(qm))
-    if missing:
-        hints['I'] = ' and '.join(missing)
+                outp.append((qm, 'missing: ' + pronounce(qm), ' '))
+        elif qm not in cstore1:
+            outp.append((qm, match1[qm] if qm in match1 else 'not matched yet', ' '))
     for qm in qstore1:
-        if qstore1[qm].type == 'Known_from_picture':
+        if qm not in match1 and qstore1[qm].type == 'Known_from_picture':
             hints['Ip'] = pronounce(qm)
+    spurious = []
     for qs in qstore2:
         if qs in cstore2:
             continue
+        if qs.startswith('Snuck'):
+            qn = str(qstore2[qs])
+            hints['Snu'] = qn
+            continue
         qn = qs if not qs.startswith('Snuck') else str(qstore2[qs])
         if qs not in match2:
+            if qs in answers2:
+                hints['Work'] = qs
+                continue
             q = qstore2[qs]
             if q.units != Units() or q.uncert or q.number not in {1, -1, 2, -2, 3, -3, Fraction(1, 2), Fraction(-1, 2)}:
-                hints['Ksp'] = qn
+                s = qn[0]
+                n2 = qn
+                if s == 'Δ' and len(n2) > 2:
+                    s = n2[1]
+                hint_spurious = False
+                if s in typicalunits and (len(n2) < 2 or n2[1] in '[_' or n2[1].isdigit()):
+                    if not good_units(s, q.units):
+                        hint_spurious = True
+                        if good_units(s.lower() if s.isupper() else s.upper(), q.units):
+                            hints['Kcap'] = qn
+                        elif q.units == Units():
+                            hints['Kspnu'] = qn + ' (' + dimension_name(typicalunits[s]) + '?)'
+                        else:
+                            hints['Kspn'] = dimension_name(q.units)
+                if not hint_spurious:
+                    spurious.append(qn)
+                outp.append((' ', qs, 'spurious?'))
             else:
+                outp.append((' ', qs, 'it makes sense?'))
                 continue
         elif qstore1[match2[qs]].type.startswith('Known_explicit'):
             continue
         elif scores[match2[qs]].number != 3:
             hints['Kw'] = qn
-        elif not scores[match2[qs]].uncert:
-            hints['Ks'] = qn
+        elif scores[match2[qs]].uncert != 0:
+            hints['Ks' if scores[match2[qs]].uncert == 2 else 'Ks2'] = qn
         elif scores[match2[qs]].name != 2:
-            hints['Kn'] = qn
+            q = qstore2[qs]
+            s = qs[0]
+            n2 = qs
+            if s == 'Δ' and len(n2) > 2:
+                s = n2[1]
+            if s in typicalunits and (len(n2) < 2 or n2[1] in '[_' or n2[1].isdigit()):
+                if not good_units(s, q.units):
+                    if good_units(s.lower() if s.isupper() else s.upper(), q.units):
+                        hints['Kcap'] = qn
+                    elif q.units == Units():
+                        hints['Kspnu'] = qn + ' (' + dimension_name(typicalunits[s]) + '?)'
+                    else:
+                        hints['Kspn'] = dimension_name(q.units)
+            else:
+                hints['Kn'] = qn
         elif ignore and qstore2[qs].linenr > ignore:
             hints['Kok'] = qn
+    if missing:
+        hints['I'] = ' and '.join(missing)
+    if spurious:
+        hints['Ksp'] = ' and '.join(spurious)
 
     if not student[1] and data:
         hints.clear()
         hints['K'] ='Get started'
 
+    if not hints:
+        for qs in qstore2:
+            if len(qs) == 1 and not qs in {'T', 'P', 'R'}:
+                hints['Sn'] = qs
     if len(set(qstore1) | set(answers1)) >= 4:
         collect_and_organize_hints(model, student, hints)
-    return model, student, scores
+    return model, student, scores, outp
 
 
 def check_calculations(model, question, student, scores, hints, ignore=None):
-    recalc = fix_knowns(model, student, scores)
+    outp = []
+    recalc = '' #fix_knowns(model, student, scores)
     calculation_matches(model, student, scores)
     ddict_model, qstore1, cstore1, answers1, match1, context1 = model
     ddict_student, qstore2, cstore2, answers2, match2, context2 = student
+    for name in qstore2:
+        if not name.startswith('Snuck'):
+            continue
+        value = str(qstore2[name])
+        for qn in qstore2:
+            if str(qstore2[qn]) == value and not qn.startswith('Snuck'):
+                hints['Num'] = qn + ' a.k.a ' + value
     if len(set(qstore1) | set(answers1)) >= 4:
         collect_and_organize_hints(model, student, hints)
+    response = None
     for a in cstore1:
-        spurious = missing = ''
         if a not in match1 or a not in scores:
             continue
         student_answer = match1[a]
         if a not in scores:
             pass#rint('waaaaah')
-        if scores[a].dependency == 50:
+        if scores[a].dependency == 40:
             if scores[a].units == 1:
                 if scores[a].number:
                     if recalc:
@@ -225,45 +306,79 @@ def check_calculations(model, question, student, scores, hints, ignore=None):
         else:
             s_dep = all_dependencies(student_answer, cstore2, qstore2)
             m_dep = all_dependencies(a, cstore1, qstore1)
-            m_dep = {match1.get(m, m) for m in m_dep}
-            spurious = ', '.join(pronounce(c) for c in (s_dep - m_dep))
-            missing = ', '.join(pronounce(c) for c in (m_dep - s_dep))
-            if spurious:
+            #rint (s_dep)
+            #rint (m_dep)
+            m_dep = {match1.get(m, pronounce(m)) for m in m_dep}
+            spurious = ' and '.join(c for c in (s_dep - m_dep))
+            missing = ' and '.join(m_dep - s_dep)
+            if missing:
+                moddep = set()
+                for child in cstore1[a][0]:
+                    if child in match1 and match1[child] not in cstore2[student_answer][0]:
+                        moddep |= {child}
+                    else:
+                        moddep |= all_dependencies(child, cstore1, qstore1)
+                moddep = {match1.get(m, pronounce(m)) for m in moddep}
+                missing = ' and '.join(c for c in (moddep - s_dep))
+
+            if spurious and missing:
+                response = 'A7:' + missing + ' instead of ' + spurious
+            elif spurious:
                 #rint('student', cstore2[student_answer][0])
                 #rint('model', cstore1[a][0])
 
                 #rint('spurious', spurious)
                 response = 'A6:' + spurious
-            if missing:
+            elif missing:
                 #rint('missing', missing)
                 response = 'A4:' + missing
+            else:
+                response /= 0
+        outp.append((a, student_answer, response))
         if response in ('A1', 'A0') and not ignore:
             continue
+        #outp.append((a, student_answer, response))
         if not ignore or qstore2[match1[a]].linenr > ignore:
-            hints[response] = pronounce(student_answer)
+            hints[response] = pronounce(a)
     for student_answer in cstore2:
         if student_answer in match2:
+            if not scores[match2[student_answer]].name:
+                hints['A1n'] = student_answer
+                s = student_answer[0]
+                if good_units(s.lower() if s.isupper() else s.upper(), qstore2[student_answer].units):
+                    hints['B3cap'] = student_answer
+
             continue
-        n2 = student_answer
-        s = n2[0]
-        if s == 'Δ' and len(n2) > 2:
-            s = n2[1]
-        if s in typicalunits and (len(n2)<2 or n2[1] in '[_' or n2[1].isdigit()):
-            if good_units(s, qstore2[student_answer].units):
-                hints['B4'] = pronounce(student_answer)
-            else:
-                hints['B3'] = pronounce(student_answer)
+        if student_answer in answers2:
+            hints['A6b'] = student_answer
         if qstore2[student_answer].units not in typical_units_reverse:
-            hints['A3a'] = pronounce(student_answer)
-        elif student_answer in answers2:
-            hints['A6a'] = pronounce(student_answer)
+            hints['A3a'] = student_answer #units not used in GenChem
         else:
-            hints['B6'] = pronounce(student_answer)
+            n2 = student_answer
+            s = n2[0]
+            if s == 'Δ' and len(n2) > 2:
+                s = n2[1]
+            if s in typicalunits and (len(n2)<2 or n2[1] in '[_' or n2[1].isdigit()):
+                if good_units(s, qstore2[student_answer].units):
+                    if student_answer in answers2:
+                        hints['A6a'] = student_answer # listed as answer, good units, wrong value
+                    else:
+                        hints['B4'] = student_answer # good units, not sure where we are going with this
+                else:
+                    if good_units(s.lower() if s.isupper() else s.upper(), qstore2[student_answer].units):
+                        hints['B3cap'] = student_answer
+                    else:
+                        hints['B3'] = student_answer # units don't match name
+            else: # no knowledge about what units should be
+                hints['B6'] = student_answer
+        outp.append(('dunno...', student_answer, ''))
+    return outp
+
 
 
 def next_steps(model, student, question, hints):
     """
-    Figures out what moves (assignments, calculations, chemistry, algebra) could be next
+    Figures out what moves (calculations, chemistry, algebra) could be next
     :param model: data describing model answer
     :param student: data describing student answer
     :param hints: dictionary of hints
@@ -271,20 +386,21 @@ def next_steps(model, student, question, hints):
     """
     ddict_student, qstore2, cstore2, answers2, match2, context2 = student
     ddict_model, qstore1, cstore1, answers1, match1, context1 = model
+    outp = []
     if not answers2 and answers1:
-        hints['U'] = ' and '.join(pronounce(a) for a in answers1)
+        if not any(a in match1 for a in answers1):
+            hints['U'] = ' and '.join(pronounce(a) for a in answers1)
+            outp.append((repr(answers1), 'no goals set', ''))
         if not cstore2 and not all(a.startswith('!') for a in answers1):
-            return
-        if 'chemical equation' not in context2 and any(a.startswith('!chemical equation') for a in answers1):
-            return
-        if 'chemical formula' not in context2 and any(a.startswith('!chemical formula') for a in answers1):
-            return
-    elif sum(1 for a in answers2 if a[0] not in '!#') < sum(1 for a in answers1 if a[0] not in '#!'):
+            hints['U'] = ' and '.join(pronounce(a) for a in answers1 if not a.startswith('#'))
+            return # expecting calculations, but none yet
+    elif sum(1 for a in answers2 if a[0] not in '!#') < sum(1 for a in answers1 if a not in match1 and a[0] not in '#!'):
         hints['Us'] = 'more unknowns'
     elif len(answers2) > 1 and not cstore2 and 'Plan' not in context2:
-        hints['P'] = 'multiple unknowns, what is the plan?'
-    else:
-        pass#rint('unknowns checked out')
+        hints['P'] = 'multiple unknowns, what is the plan (write Plan and order of calculation)?'
+    elif sum(1 for a in answers2 if a[0] not in '!#') == sum(1 for a in answers1 if a[0] not in '#!'):
+        outp.append((repr(answers1), repr(answers2), 'matching # of quantitative goals'))
+        #rint('unknowns checked out')
     ddict_model, qstore1, cstore1, answers1, match1, context1 = model
     assignm, calcs = solution_structure(qstore1, cstore1, answers1, context1)
     matches = set(match1.keys())
@@ -295,24 +411,40 @@ def next_steps(model, student, question, hints):
     for item in calcs:
         if item in matches:
             continue
+        needed_for = "Nothing depends of this subgoal"
+        if item not in answers1:# intermediate calculation
+            n = still_needed(item, cstore1, matches, answers1)
+            if n:
+                needed_for = n
+            else:
+                outp.append((item, 'not calculated', needed_for))
+                continue #no reason to calculate this (already calculated things that depend on it)
         m = len(calcs[item] - matches) #number of knowns missing for this step
         if m: #missing knowns: choose the one missing the least
+            if item in answers1:
+                outp.append((item, 'not yet', 'problem goal, calculation requires ' + ' and '.join(calcs[item] - matches)))
+            else:
+                outp.append((item, 'not yet', 'need for ' + needed_for + ', calculation requires ' + ' and '.join(calcs[item] - matches)))
             if m < best:
                 best = m
                 bestcalc = item
         else: #ready to go: choose the least complex calculation
+            if item in answers1:
+                outp.append((item, 'not yet', 'problem goal; ready to go'))
+            else:
+                outp.append((item, 'not yet', 'need for ' + needed_for + '; ready to go'))
             if len(calcs) < bestnow:
-                bestnow = len(calcs)
+                bestnow = len(calcs[item])
                 bestnowcalc = item
     if bestnowcalc:
         if bestnowcalc in answers1:
             #rint('...pump for calculating answer', item)
+            hints['S2a:' + ' and '.join(match1.get(c, c) for c in cstore1[bestnowcalc][0])] = pronounce(bestnowcalc)
             hints['S3a'] = pronounce(bestnowcalc)
-            hints['S2a'] = ' and '.join(pronounce(match1.get(c, c)) for c in cstore1[bestnowcalc][0])
         else:
             #rint('...pump for calculating', item)
+            hints['S2:' + ' and '.join(match1.get(c, c) for c in cstore1[bestnowcalc][0])] = pronounce(bestnowcalc)
             hints['S3'] = pronounce(bestnowcalc)
-            hints['S2'] = ' and '.join(match1.get(c, c) for c in cstore1[bestnowcalc][0])
 
     elif bestcalc:
         #rint('...pump for lowest-hanging fruit: "How would you calculate', bestcalc + '?"')
@@ -322,7 +454,7 @@ def next_steps(model, student, question, hints):
         for item in calcs[bestcalc] - matches:
             nitem = pronounce(match1.get(item, item))
             if qstore1[item].type.endswith('stoich'):
-                if '\n!' not in question:
+                if '\n!' not in question and 'chemical equation' not in context2:
                     hints['E'] = nitem
                 else:
                     hints['Eu'] = nitem
@@ -330,8 +462,17 @@ def next_steps(model, student, question, hints):
                 hints['Dc'] = nitem
             elif qstore1[item].type.endswith('chemformula'):
                 hints['F'] = nitem
-            else:
+            elif not qstore1[item].type.endswith('picture') and not qstore1[item].type.endswith('explicit'):
                 hints['D'] = nitem
+    if 'Conversion' in context1:
+        for item, _ in context1['Conversion']:
+            if ' in ' in item:
+                funits = item.split(' in ')[1]
+                if funits not in qstore2:
+                    hints['Conv'] = funits
+        if 'Conversion' not in context2:
+            hints['Conv2'] = ''
+
     if 'algebra' in context1 and 'algebra' not in context2:
         first_occurence = min(linenr for formula, linenr in context1['algebra'])
         if not any(qstore1[qn1].linenr > first_occurence for qn1 in match1 if qn1 in cstore1):
@@ -385,7 +526,15 @@ def next_steps(model, student, question, hints):
     if 'chemical formula' in context2 or 'chemical equation' in context2:
         if 'chemical formula' not in context1 and 'chemical equation' not in context1:
             hints['!un'] = 'line starting with !'
+    return outp
 
+
+def still_needed(item, cstore1, matches, answers1):
+    for item2 in cstore1: # possible reasons to calculate this
+        if item in cstore1[item2][0] and item2 not in matches: #actual reason to calculate this
+            if item2 in answers1 or still_needed(item2, cstore1, matches, answers1):
+                return item2
+    return None
 
 def rubric(model):
     rub = dict()
@@ -402,12 +551,13 @@ def rubric(model):
     st = [c+':' + q[0] for c in context if not (c[0] in '#!' or c == 'unknown') for q in context[c]]
     st.extend([q for q in cstore if q not in answers])
     for cat in qu, im, st, an:
+        break
         print(cat)
     s = len(an + qu + im + st)
     #rint('Here is how the grading will work')
-    rub['question'] = int(100 * len(qu) / s)
-    rub['data'] = int(100 * len(im) / s)
-    rub['work'] = int(100 * len(st) / s)
+    rub['question'] = int(100 * len(qu) / s)    # qu stands for question
+    rub['data'] = int(100 * len(im) / s)    # im stands for implicit knowns
+    rub['work'] = int(100 * len(st) / s)   # st stands for steps
     rub['answer'] = 100 - sum(rub[r] for r in rub)
     #rint('  %d%% for collecting information from the question' % int(100 * nr_ex / s))
     #rint('  %d%% for finding the other necessary quantities' % int(100 * nr_im / s))
@@ -416,7 +566,7 @@ def rubric(model):
     return rub, qu, im, st, an
 
 
-def grade_answer(student_answer, model_answer, question, hwid):
+def grade_answer(student_answer, model_answer, question, hwid, verbose = False):
     """
     compare answer to model answer for grading
     :param student_answer: submitted student work
@@ -425,14 +575,17 @@ def grade_answer(student_answer, model_answer, question, hwid):
     :param hwid: the ID of the question (containing the chapter number)
     :return: formatted score, ready for display
     """
-    doctored_question = question.replace('<em>', '').replace('</em>', '').replace('-g', ' g').replace('-M', ' M')
-    model = collect_inputs(model_answer, doctored_question, snuck=False)
+    doctored_question = question.replace('<em>', '').replace('</em>', '').replace('-g', ' g').replace('-M', ' M').replace('molar','M')
+    try:
+        model = collect_inputs(model_answer, doctored_question, snuck=False)
+    except:
+        return '<hr>' + hwid + ': <br>' + 'Not your fault, pqcalc has a problem with grading this problem. You get a 100...<br>'
     student = collect_inputs(student_answer, doctored_question, doubledip=True)
     grading_rubric, qu, im, st, an = rubric(model)
 
     scores = high_quality_matches(model, student)
     shallow_matches(model, student, scores)
-    recalc = fix_knowns(model, student, scores)
+    recalc = '' #fix_knowns(model, student, scores)
     calculation_matches(model, student, scores)
     an_sc, quant_sc, an_feedback = score_answers(an, scores, model, student)
     st_sc, work_feedback = score_work(st, quant_sc, scores, model, student)
@@ -443,29 +596,41 @@ def grade_answer(student_answer, model_answer, question, hwid):
     sco['work'] = st_sc
     sco['answer'] = an_sc
     total = 0
-    grade = ['<hr>']
+    grade = ['<hr>' + hwid + ': ']
     for r in grading_rubric:
         if not grading_rubric[r]:
             continue
         p = int(sco[r] * grading_rubric[r] / 100)
         total += p
-        grade.append('%s: %d out of %d points<br>' % (r, p, grading_rubric[r]))
+        #grade.append('<br>%s: %d out of %d points' % (r, p, grading_rubric[r]))
     if inputs_feedback:
-        grade.append('<br>Input: ' + '<br>'.join(inputs_feedback))
+        grade.append('<h3>Input</h3>' + '<br>'.join(inputs_feedback))
     if recalc:
         grade.append('<br>To check answer, inputs were changed as follows:<br>' + '<br>'.join(recalc))
     if work_feedback:
-        grade.append('<br>Work: ' + '<br>'.join(work_feedback))
+        grade.append('<h3>Work</h3>' + '<br>'.join(work_feedback))
     if an_feedback:
-        grade.append('<br>Answer: ' + '<br>'.join(an_feedback))
-    grade.append('<br>Overall score is %d out of 100 points' % total)
+        grade.append('<h3>Answer</h3>' + '<br>'.join(an_feedback))
+    #grade.append('<h3>Model answer</h3>' + '<br>'.join(model_answer.splitlines()))
+    if not verbose:
+        grade = [hwid + ': ']
+    comment = 'Good answer! Now try a similar question just with pencil and paper.'
+    if total < 90:
+        if total < 80:
+            if total < 70:
+                comment = 'Maybe go to office hours to work on this problem now that you are familiar with it?'
+            else:
+                comment = 'Maybe do some more end-of-chapter problems with your study group?'
+        else:
+            comment = 'Look at the feedback and take some notes. What you want to focus on next time?'
+    grade.append('<hr>PQtutor says: %s' % comment)
 
     ''' ''.join(hint[:-1]) + '''
     if recalc:
         recalc = 'Changed '+' and '.join(recalc)
     else:
         recalc = ''
-    return ''.join(grade)
+    return '<br>\n'.join(grade)
     #return collect_and_organize_score + recalc + ''.join(hint) + solve_score + brief_work
 
 
@@ -477,28 +642,31 @@ def stuff_score(model, student):
     return 0
 
 
-def collect_inputs(input, question, doubledip=False, snuck=True):
+def collect_inputs(input, question, doubledip=False, snuck=True, is_student=False):
     '''
     Figures out which parts of input are assignments, and stores them ordered by dimension
     :param input: PQcalc input for analysis
     :return:
     '''
     commands = [line for line in input.splitlines() if line and line != '\n']
-    answers, context, state = classify_commands(commands, question)
+    answers, context, state = classify_commands(commands, question, is_student)
     qstore, cstore, storage = classify_calcs(answers, doubledip, snuck, state)
-    if not answers and cstore:
+    if not is_student and not answers and cstore:
         q = next(reversed(cstore))
         answers.append(q)
         qstore[q].type = 'CalcAnswerAssumed'
     return storage, qstore, cstore, answers, dict(), context
 
 
-def classify_commands(commands, question):
+def classify_commands(commands, question, is_student):
     answers = []
     types = []
     context = ddict(list)
+    #result, _ = calc('', question)
     state = State()
-    for linenr, line in enumerate(commands):
+    #for s in state:
+    #    state[s].type = 'Question'
+    for linenr, line in enumerate(question.splitlines() + commands):
         if not line.strip():
             continue
         type, name, q, expression = calc2(line, state)
@@ -524,7 +692,7 @@ def classify_commands(commands, question):
                     comtype = '!chemical equation'
                 if 'chemical formula' in line:
                     comtype = '!chemical formula'
-            elif answers or linenr == len(commands) - 1: #comment after the answer has been given
+            elif not is_student and linenr == len(commands) - 1: #comment after the answer has been given
                 comtype = '#AnswerText'
             else:
                 comtype = 'Generic'
@@ -558,9 +726,10 @@ def classify_commands(commands, question):
                 q.type = 'Known_stoich'
             else:
                 doctored_expression = expression.replace('°aC', '°C').replace('°aC', '°ΔC').replace('. ', ' ').strip()
-                if doctored_expression in question:
+                doctored_question = question.replace('<em>', '').replace('</em>', '').replace('-g', ' g').replace('-M',' M').replace('molar', 'M')
+                if doctored_expression in doctored_question:
                     q.type = 'Known_explicit'
-                elif doctored_expression[1:] in question:
+                elif doctored_expression[1:] in doctored_question:
                     q.type = 'Known_explicit_minus'
                 elif doctored_expression.split()[0] in question:
                     q.type = 'Known_explicit_I_think'
@@ -583,7 +752,8 @@ def classify_calcs(answers, doubledip, snuck, state):
     storage = defaultdict(list)
     snucks = set()
     linenr = None
-    for name in reversed(state):
+    #rint(state.keys())
+    for name in state:
         q = state[name]
         if name.startswith('Snuck'):
             snucks.add(name)
@@ -606,6 +776,8 @@ def classify_calcs(answers, doubledip, snuck, state):
             if doubledip and not name in answers:
                 storage[q.units].append(name)
             q.I.update(snucks)
+            if snucks:
+                print(name, ' snuck in ', snucks, q.I)
             snucks = set()
             cstore[name] = (q.I, q.F, q.O, q.expression)
         qstore[name] = q
@@ -640,7 +812,7 @@ Quant_score = namedtuple('Quant_score', 'numerical units number uncert name bonu
 def quant_score(units, number, uncert, name, bonus):
     score = 0
     score += [0, 25, 35, 45][number]
-    score += [0, 10][uncert]
+    score += [10, 2, 0][uncert]
     score += [0, 3, 7][name]
     score += [0, 40][units]
     score += bonus
@@ -684,10 +856,10 @@ def similarity(n1, n2, q1, q2, bonus = 0, chapter=None):
             number = 2
         elif abs(q1.number - q2.number) < q1.uncert * 10:
             number = 1
-        if q1.uncert < 1.5 * q2.uncert and q1.uncert * 1.5 > q2.uncert:
-            uncert = 1
-        elif q1.uncert == q2.uncert:
-            uncert = 1
+        if q1.uncert > 9 * q2.uncert:
+            uncert = 1 # student value looks more certain than it should
+        elif q1.uncert * 9 < q2.uncert:
+            uncert = 2 # student value too uncertain
             #rint('************************************ wah ***************************************')
     elif q2.uncert:
         if abs(q1.number - q2.number) < q2.uncert:
@@ -706,7 +878,7 @@ def similarity(n1, n2, q1, q2, bonus = 0, chapter=None):
     else:
         if q1.number == q2.number:
             number = 3
-        uncert = 1
+        uncert = 0
     if bonus and not number:
         s1 = str(q1)
         s2 = str(q2)
@@ -780,14 +952,21 @@ def all_dependencies(name, cstore, qstore):
     :return: {leaves}
     '''
     dep = set()
+    if name not in cstore:
+        return {name}
     for child in cstore[name][0]:
         if child in dep:
             continue
         elif child in cstore and not child == name:
             dep = dep | all_dependencies(child, cstore, qstore)
         else:
-            dep.add(child)
-    dep = [d for d in dep if (qstore[d].units != Units() or qstore[d].uncert) or d.startswith('ν[')]
+            if child.startswith('Snuck') and hasattr(qstore[child], 'twin'):
+                dep.add(qstore[child].twin)
+            else:
+                dep.add(child)
+    dep = [d for d in dep if (qstore[d].units != Units() or qstore[d].uncert) or d.startswith('ν[') or d.startswith('N')]
+    dep = [d if not d.startswith('Snuck') else str(qstore[d]) for d in dep]
+    newstate = State()
     return set(dep)
 
 
@@ -795,7 +974,7 @@ def calc_score(dependency, units, number, name):
     score = 5
     score += dependency
     if units:
-        score += 25
+        score += 35
         if number:
             score += 15
     if name:
@@ -827,9 +1006,11 @@ def similarity_calc(n1, n2, q1, q2, dep1, dep2, match2, f1, o1, f2, o2):
         number = 0
     if n1[0] == n2[0]:
         name = 1
+    if len(n2) > 1 and n2[1] in 'abcdefghijklmnopqrstuvwxyz':
+        name = 1
     leftovers = dep1 ^ dep2t
     if not leftovers:
-        dependency = 50
+        dependency = 40
     else:
         dependency = 20 - 5 * len(leftovers)
     return calc_score(dependency, units, number, name)
@@ -850,8 +1031,10 @@ def calculation_matches(model, student, scores):
     for name2 in reversed(names2):
         i2, f2, o2, ex2 = cstore2[name2]
         dep2 = all_dependencies(name2, cstore2, qstore2)
+        #check_cancelation(dep2, name2 + ' = ' + ex2, qstore2)
         bestscore = Calc_score(-100, 0, 0, 0, 0)
         bestname = None
+        distinction = 0
         for name1 in names1:
             if name1 in match1:
                 continue
@@ -869,11 +1052,14 @@ def calculation_matches(model, student, scores):
                 matched += 1
                 #rint('\nLook no further: ', name1, name2, '%4.1f' % score.numerical, score)
                 break
-            if score.numerical > bestscore.numerical:
+            if score.numerical >= bestscore.numerical:
+                distinction = score.numerical - bestscore.numerical
                 bestscore = score
                 bestname = name1
+            elif distinction > bestscore.numerical - score.numerical:
+                distinction = bestscore.numerical - score.numerical
         else:
-            if bestscore.numerical > 30:
+            if bestscore.numerical > 50 and distinction > 5:
                 match1[bestname] = name2
                 match2[name2] = bestname
                 if bestname in answers1 and name2 in answers2:
@@ -883,6 +1069,21 @@ def calculation_matches(model, student, scores):
                 matched += 1
                 #rint('\nNot great, but best bet: ', bestname, name2,  '%4.1f' % bestscore.numerical, bestscore)
                 names1.remove(bestname)
+
+def check_cancelation(dep, ex, qstore):
+    newstate = State()
+    for d in dep:
+        newstate[d] = qstore[d]
+    _, _, qold, _ = calc2(ex, newstate)
+    for d in dep:
+        num = newstate[d].number
+        newstate[d].number *= 2
+        _, _, qnew, _ = calc2(ex, newstate)
+        newstate[d].number = num
+        ratio = qold.number / qnew.number
+        if abs(ratio - 1.0) < 0.00001:
+            print('who cares about', d)
+
 
 
 def score_answers(an, scores, model, student):
@@ -916,7 +1117,8 @@ def score_answers(an, scores, model, student):
             if a in scores:
                 calc_score += scores[a].numerical
                 if scores[a].numerical != 100:
-                    feedback.append(repr(scores[a]))
+                    feedback.append('Your answer for ' + match1[a] + ' is ' + str(qstore2[match1[a]]) +
+                                    '. The model answer is ' + str(qstore1[a]))
             else:
                 feedback.append('You did not calculate the ' + pronounce(a, qstore1[a].units))
 
@@ -940,10 +1142,16 @@ def score_work(st, quantsc, scores, model, student):
             if a in scores:
                 work_score += scores[a].numerical
             else:
-                feedback.append('It might have helped to calculate the ' + pronounce(a))
+                for ans1 in (ans1 for ans1 in answers1 if ans1 in cstore1):
+                    if not ans1 in match1 and a in all_dependencies(ans1, cstore1, qstore1):
+                        feedback.append('It might have helped to calculate the ' + pronounce(a) + ' to figure out the ', ans1)
+                        break
+                else:
+                    work_score += 100
+                    feedback.append('You got the ' + pronounce(ans1) + ' without calculating the ' + pronounce(a) + ' explicitly, which is fine.')
         else:
             if a.split(':')[0] in context2:
-                type, eq2 = a.split(':')
+                type, eq2 = a.split(':', maxsplit=1)
                 bestscore = 0
                 for b in context2[type]:
                     score, *_ = compare_reactions(interpret_equation(b[0][1:]), interpret_equation(eq2[1:]))
@@ -964,9 +1172,9 @@ def fix_knowns(model, student, scores):
         q1 = match2[q2]
         if 19 < scores[q1].numerical < 100 and (scores[q1].number < 3 or scores[q1].uncert < 1):
             #rint('fixing (?) {}:{}'.format(q2, repr(qstore2[q2])))
-            qstore2[q2] = qstore1[q1]
             #rint('fixed (?) {}:{}, score was {}'.format(q2, repr(qstore2[q2]), scores[q1]))
-            recalc.append(q2+' to ' + str(qstore1[q1]))
+            recalc.append(q2+' from '+ str(qstore2[q2]) + ' to ' + str(qstore1[q1]))
+            qstore2[q2] = qstore1[q1]
     if recalc:
         newstate = State()
         for q2 in qstore2:
@@ -996,7 +1204,7 @@ def collect_and_organize_hints(model, student, hints):
         if len(pdict[a]) < 2:
             continue
         #rint(a, ' '.join(pdict[a]))
-        cont = [set(quantity_name_context(match1[q1])) for q1 in pdict[a] if q1 in match1]
+        cont = [set(quantity_name_context(match1[q1])) for q1 in pdict[a] if q1 in match1 and not match1[q1].startswith('Snuck')]
         if len(cont) < 2:
             continue
         common = cont[0]
@@ -1032,30 +1240,73 @@ def flatten(list_of_lists):
 
 hints_english = {
     'K': ['T: Need to start writing down quantities given in the question',
-          'C: chapter specific wisdom*',
-          'Q: The first thing I like to do is to write down all the quantitative information in the question.',
-          'L: What was the first thing they did in the worked example?'],
+          'Q: The first thing I like to do is to write down all the quantitative information in the question. Press go for more suggestions from the virtual study group.',
+          'B: The units usually give a great clue what kind of quantities the question talks about.',
+          'L: What was the unknown in the worked example?',
+          'C: chapter specific wisdom*'],
+    'Work': ['T: You need to show your work, not just write down the answer',
+            "B: I think we are supposed to calculate quantity's name with PQcalc, not copy the value from somewhere else",
+            "Q: We need to show how quantity's name relates to the known quantities",
+            "L: What calculations did they do in the worked example?"],
     'Ksp': ['T: Unintelligible or unexpected quantity',
-            "B: Can we take another look at the quantity's name?",
-            "L: Did they use the quantity's name in the worked example?"],
+            "L: Did they use quantity's name in the worked example or is it just extra information?",
+            "Q: Is there some typo in quantity's name?",
+            "B: Can we take another look at quantity's name in the question?"],
+    'Kcap': ['T: Check capitalization',
+             "Q: We have to be careful with the capitalization, e.g. t is time and T is temperature",
+             "C: What about the capitalization of quantity's name (unit table)?",
+             "L: M is molar mass and m is mass",
+             "B: V is volume and v is velocity (unit table)"],
+    'Kspn': ['T: Unintelligible or unexpected quantity with unit mismatch',
+             "Q: Maybe we should take another look at the exact text of the question",
+             "C: Is there a quantity's name mentioned in the question (unit table)?",
+             "L: Was there a quantity's name in the worked example? Check for typos and units",
+             "B: Let's check whether the name and units we chose is appropriate for a quantity's name (unit table)"],
+    'Kspnu': ['T: No units, name suggests it should have units',
+             "Q: Most quantities have units, or at least should have...",
+             "C: What is a good unit for quantity's name (unit table)?",
+             "L: Was there a quantity's name in the worked example? Check for typos and units",
+             "B: Let's check whether the name and units we chose is appropriate for a quantity's name (unit table)"],
     'Kw': ['T: Implicit known has incorrect value',
            "Q: Where did we look up quantity's name? Was it a source we can trust?",
            "B: Is quantity's name correct (value, sig figs, exponent)?",
            'L: Where did they find additional data in the worked example?'],
-    'Ks': ['T: Implicit known has incorrect sigfig',
-           "Q: Did you hear the sigfig police is in town again?",
-           "B: Remember how you do sigfigs in this calculator?",
+    'Ks': ['T: Implicit known has too few sigfig',
+           "Q: I like to pay attention to significant figures of data I gather. If we write down too few, our result will be approximate only",
+           'B: Remember how you do sigfigs in this calculator? <a href="ico/manual.html">manual</a>',
            "L: Where did they get quantity's name in the worked example ?"],
-    'Is': ['T: Explicit known has incorrect sigfig',
-           "Q: Did you hear the sigfig police is in town again?",
-           "B: Remember how you do sigfigs in this calculator?",
+    'Num': ['T: Use of numerical value instead of quantity name',
+           "Q: If we gave it a name, we should use the name in calculations.",
+           "B: We should not be entering numbers anymore (quantity's name).",
+           "L: How did they use quantity's name in the worked example ?"],
+    'Conv': ["T: Need to define a new unit",
+           "B: What kind of unit is quantity's name?",
+           "Q: I don't think PQcalc knows about the unit quantity's name mentioned in the question",
+           "L: How did they use quantity's name in the worked example ?"],
+    'Conv2': ["T: Question asks for unit conversion",
+           "Q: Did we convert units like it says in the question?",
+           "B: Big unit small number, small unit big number... sometimes a different unit helps to understand the answer",
+           "L: Was there a unit conversion in the worked example ?"],
+    'Ks2': ['T: Implicit known has too many sigfig',
+           "Q: I like to pay attention to significant figures of data I gather.",
+           'B: Remember how you do sigfigs in this calculator? <a href="ico/manual.html">manual</a>',
+           "L: Where did they get quantity's name in the worked example ?"],
+    'Is': ['T: Explicit known has to few sigfig',
+           "Q: I like to pay attention to significant figures given in the question. If we write down too few, our result will be approximate only",
+           'B: Remember how you do sigfigs in this calculator? <a href="ico/manual.html">manual</a>',
+           'L: How did they interpret the sigfigs in the worked example?'],
+    'Is2': ['T: Explicit known has too many sigfig',
+           "Q: I like to pay attention to significant figures given in the question",
+           'B: Remember how you do sigfigs in this calculator? <a href="ico/manual.html">manual</a>',
            'L: How did they interpret the sigfigs in the worked example?'],
     'I': ['T: You are missing some explicit knowns',
           "Q: I like to reread the question to make sure I'm not missing any given quantities",
           'B: If it has units, write it down',
+          "C: What happened to quantity's name?",
           'L: What other data did they use in the worked example?'],
     'Ii': ['T: You have mistakes in some explicit knowns',
-           "Q: I like to reread the question to check for typos (sig figs, exponent, units?)",
+           "L: So we are collecting information from the question. Let's make sure we get that first step right.",
+           "Q: I like to reread the question to check for typos (upper/lower case, sig figs, exponent, units?)",
            'B: Did we correctly copy units and values from the question?'],
     'Ipm': ['T: You have incorrect sign in explicit known',
            "Q: My dad used to say (+) or (-) is a matter of luck)",
@@ -1065,13 +1316,27 @@ hints_english = {
            "C: Don't quantity's name belong together and should have the same label?",
            'B: I like to organize my quantities in before/after or by chemical species, and name them accordingly'],
     'In': ['T: You chose a strange name',
-           "Q: If there is no conventional one-letter symbol for quantity's name, we could use a word as a name so nobody gets confused",
-           "B: The unit table might suggest a name rather than quantity's name?",
+           "B: The unit table might suggest a name more conventional than quantity's name.",
+           "Q: If there is no conventional one-letter symbol for a quantity, we could use a word as a name so nobody gets confused",
            'L: How did they name quantities they looked up in the worked example?'],
+    'Snu': ["T: You did not give quantity's name a name",
+           "Q: The advantage of naming quantities is to learn about their meaning and where they are coming from",
+           "C: In the calculation, where is quantity's name coming from?",
+           "L: What name did they choose for something like quantity's name in the worked example?"],
     'Kn': ['T: You chose a strange name',
            "Q: I like to check whether the name matches the units",
            "C: Where did we look up quantity's name? Did they have a better name for it?",
            'B: How about we check the unit table to see if the name we chose makes sense?'],
+    'Sn': ['T: You chose a short name',
+           "Q: Do you know more about quantity's name that you could add to the name",
+           "L: Did they have more descriptive names for quantities in the worked example?",
+           'B: We could add a subscript to the name, and then an adjective like initial/final, the physical state, the substance it refers to'],
+    'Sk': ['T: You should name it',
+           "Q: Can we give quantity's name a name?",
+           "L: Did they have descriptive names for quantities in the worked example?",
+           "B: We could use the common symbol for quantity's name, and add a descriptive subscript or - in brackets - the substance it refers to"],
+    'Z': ['T: We are not discussing calculations yet',
+           "Q: We better collect all the knowns and unknowns before we start calculating"],
     'Us': ['T: There are multiple unknowns; what are they?',
            'B: What are we trying to figure out? What <em>are</em> the unknowns?',
            'Q: Sometimes there is more than one unknown',
@@ -1084,7 +1349,7 @@ hints_english = {
           'B: I like writing down the chemical equation of the reaction we are talking about.',
           'L: Was there a chemical equation in the worked example?',
           'C: What type of reaction is this? Can we write it down?'],
-    'Eu': ['T: We need to interpret chemical equation to calculate next goal',
+    'Eu': ['T: We need to interpret a chemical equation to calculate next goal',
            'B: What do we do with a balanced chemical equation?',
            'Q: I like clicking on stuff I''m not familiar with (like chemical equations)',
            'L: How did they use the chemical equation in the worked example?'],
@@ -1093,6 +1358,7 @@ hints_english = {
           'L: Was there a chemical formula in the worked example?',
           'C: Do we know its chemical formula?'],
     'D': ['T: Known from external source',
+          'C: We got all the information given explicitly in the question. Great! What is next?',
           'L: What other quantities were used in the worked example?',
           'Q: Maybe they are not giving us all the information directly. Maybe we can look something up.',
           'B: The appendices of the textbook contain a lot of data on different chemical species'],
@@ -1107,17 +1373,19 @@ hints_english = {
            'C: This chapter has questions that are quantitative and others that are not',
            'B: The answer might just be a formula'
            'L: What form did the answer have in the worked example'],
-    '!un': ['T: unexpected chemical formula',
-            'C: Do we really need a chemical formula here?',
-            'B: Chemical formulas are necessary if the stoichiometry is relevant, but is it in this case?',
+    '!un': ['T: unexpected chemical equation',
+            'C: Do we really need a chemical equation here?',
+            'B: Chemical equations are necessary if the stoichiometry is relevant, but is it in this case?',
             'Q: Anything that helps me to understand the chemistry - you know chemical equations are not my strength... '],
     '!': ['T: non-quantitative question',
           "Q: Didn't we say we are looking for a chemical formula or equation? Not my strength...",
           'B: Are we ready to summarize the chemical insight?'],
     '!s': ['T: spurious chemical species',
+           "Q: Great, we are writing a chemical equation! I'm more at home with numbers, so can you walk me through it?",
            "B: Is there solvent or some other species that doesn't belong in the equation?",
            'C: Are we writing a molecular or a net ionic reaction?'],
     '!m': ['T: missing chemical species',
+           "Q: Fascinating, all those symbols! Which formula corresponds to which substance?",
            "B: Did we account for all the reactants and products?",
            'C: Are we writing a molecular or a net ionic reaction?'],
     '!ms': ['T: incorrect chemical species',
@@ -1131,7 +1399,7 @@ hints_english = {
            'C: Did they ask for integer coefficients? Does one of the coefficients have to be one?'],
     '!f': ['T: chemical formula different',
            "B: Does the periodic table help to check this chemical formula?",
-           'C: What kind of chemical formula did they use in the worked example?'],
+           'L: What kind of chemical formula did they use in the worked example?'],
     '!p': ['T: phase missing or incorrect',
            "B: Did we write down the physical state of the species?",
            'C: Sometimes the physical state helps to understand what is going on'],
@@ -1142,12 +1410,14 @@ hints_english = {
           'Q: There are multiple unknowns here. Which one should we start with?',
           'L: In what order did they proceed in the worked example?'],
     'S': ['T: Time for some calculation, but lacking data',
-          'Q: So what can we calculate at this point? Are we still missing some data?',
+          "Q: Are we still missing some data to calculate quantity's name?",
           "C: If the question mentions concepts I don't understand, I like to go to the chapter summary",
-          'L: How did they approach the calculation in the worked example?<br>',
+          'L: How did they approach the calculation in the worked example?',
           "B: How could we calculate the quantity's name (mathematical formulae)?",
           ],
     'S2': ['T: You have sufficient data (set of knowns) to do the next step',
+           "Q: Hey, we are making progress! What is the next step?",
+           "C: Cool, now we can apply the new stuff we learned in this chapter",
            'B: Can we use set of knowns to calculate something useful (mathematical formulae)?',
            'L: What did they do with set of knowns (or similar quantities) in the worked example?',
            ],
@@ -1162,17 +1432,17 @@ hints_english = {
     'S3a': ["T: You have sufficient data to determine the answer, quantity's name",
             'Q: I get the feeling we are getting close to the answer. What was the unknown again?',
             "C: How would we calculate the quantity's name (mathematical formulae)?",
-            "C: How did they determine this quantity type in the worked example?",
+            "L: How did they determine this quantity type in the worked example?",
             ],
     '@': ['T: You will use a complicated mathematical equation, better write it down',
           'Q: I love solving mathematical equations for the unknown... is it time for starting a line with "@"?',
           'B: Could we just write down the mathematical equation that relates all the quantities (starting with an "@" so it is a comment)?',
           'C: What kind of mathematical formulae were introduced in this chapter?',
           'L: What mathematical formula did they use in the worked example, and did they have to solve for a variable first?'],
-    'z': ['{"ico/B.jpg" height ="100" style="display: inline"}{"ico/Q.jpg" height ="100" style="display: inline"}{"ico/L.jpg" height ="100" style="display: inline"}{"ico/C.jpg" height ="100" style="display: inline"}<br>Our little software minds are blown. Try office hours or a tutor, maybe?',
-          '{"ico/L.jpg" height ="100" style="display: inline"}{"ico/C.jpg" height ="100" style="display: inline"}{"ico/B.jpg" height ="100" style="display: inline"}{"ico/Q.jpg" height ="100" style="display: inline"}<br>How about a little water break? We seem to be stuck anyway.',
-          '{"ico/C.jpg" height ="100" style="display: inline"}{"ico/B.jpg" height ="100" style="display: inline"}{"ico/Q.jpg" height ="100" style="display: inline"}{"ico/L.jpg" height ="100" style="display: inline"}<br>What time is it? We need to go recharge our positronic brains',
-          '{"ico/L.jpg" height ="100" style="display: inline"}{"ico/C.jpg" height ="100" style="display: inline"}{"ico/B.jpg" height ="100" style="display: inline"}{"ico/Q.jpg" height ="100" style="display: inline"}<br>Maybe we can ask about this problem right before next class.',
+    'z': ['{"ico/B.jpg" height ="100" style="display: inline"}{"ico/Q.jpg" height ="100" style="display: inline"}{"ico/L.jpg" height ="100" style="display: inline"}{"ico/C.jpg" height ="100" style="display: inline"}<br>Our little software minds are blown. Try office hours or a tutor, maybe? Goodbye for now...',
+          '{"ico/L.jpg" height ="100" style="display: inline"}{"ico/C.jpg" height ="100" style="display: inline"}{"ico/B.jpg" height ="100" style="display: inline"}{"ico/Q.jpg" height ="100" style="display: inline"}<br>How about a little water break? We seem to be stuck anyway. See you in a bit...',
+          '{"ico/C.jpg" height ="100" style="display: inline"}{"ico/B.jpg" height ="100" style="display: inline"}{"ico/Q.jpg" height ="100" style="display: inline"}{"ico/L.jpg" height ="100" style="display: inline"}<br>What time is it? We need to go recharge our positronic brains. See you later!',
+          '{"ico/L.jpg" height ="100" style="display: inline"}{"ico/C.jpg" height ="100" style="display: inline"}{"ico/B.jpg" height ="100" style="display: inline"}{"ico/Q.jpg" height ="100" style="display: inline"}<br>Maybe we can ask about this problem right before next class. Looking forward to it!',
           ],
     'err': ['C: Stoichiometry, signs, ln/log'],
     'A0': ['T: Calculation correct, inputs need fixing',
@@ -1184,40 +1454,58 @@ hints_english = {
            'B: Do the name and the units match?',
            'L: How did they name the result in the worked example?'],
     'A1': ['T: This is correct',
-           "Q: Let's figure out a way to check our work",
+           "Q: We made some progress! Let's figure out a way to check our work",
            'B: Does the answer have the correct units? Maybe we are done.',
            'C: Is the result comparable to what we saw previously in the chapter?',
            'L: One more look at the worked example, and then we are ready to submit?'],
     'A2': ['T: correct units but wrong value. Input confusion or wrong formula (+/- maybe)',
-           'B: Does this value make sense?',
+           "B: Does this value for quantity's name make sense?",
+           "C: Is the formula we are using correct? The units seem to make sense...",
+           "Q: Can we try the formula with simpler numbers where we know the answer?",
            "L: Let's compare this to the worked example."],
     'A2b': ['T: correct units but wrong value. Input confusion or wrong formula (+/- maybe)',
            'B: Can we compare our calculation to the mathematical formulae at the end of the chapter?',
            'C: Are we multiplying by the wrong unitless number?',
            "L: Let's compare this to the worked example."],
     'A3': ['T: Wrong dimensions, check formula and inputs',
+           "Q: I love it, we are in the middle of calculating things. Now we can take a look at the units we got.",
            "B: Let's check whether the units we got make sense for the quantity's name (unit table)",
            "C: Let's take another close look at the mathematical formulae at the end of the chapter",
            'L: What mathematical formula did they use in the worked example?<br>'],
+    'B3cap': ['T: Units inconsistent with variable name, maybe capitalization problem',
+             "Q: We have to be careful with the capitalization, e.g. t is time and T is temperature",
+             "C: What about the capitalization of quantity's name (unit table)?",
+             "L: M is molar mass and m is mass...",
+             "B: V is volume and v is velocity ... (unit table)"],
     'B3': ['T: Wrong dimensions, check formula and inputs and name',
-           "B: Let's check whether the units we got are appropriate for the quantity's name (unit table)",
+           "B: Let's check whether the units we got are appropriate for quantity's name (unit table)",
            'L: What steps did they do in the worked example, and how did they name those quantities?',
            "C: Let's take another close look at the mathematical formulae at the end of the chapter"],
     'A3a': ['T: Funky dimensions, check formula and inputs',
-            "B: Those units are crazy looking (unit table)",
-            'Q: Did we divide instead of multiply, or something like that?',
+            "C: And we have a result! I don't remember anything in this chapter with those units...",
+            "B: The units of quantity's name are crazy looking (unit table)",
+            'Q: Did we divide instead of multiply, or forgot parentheses, or something like that?',
             'L: What happened to the units in the worked example?'],
-'A4': ['T: this might be a step in the calculation, but not the answer. Checking step.',
+    'A4': ['T: this might be a step in the calculation, but not the answer. Checking step.',
            'Q: Is this already the answer or is there a step missing?',
-           "C: Doesn't it depend on the missing quantity"],
+           "C: Doesn't quantity's name depend on missing quantity?"],
     'A6': ['T: Spurious quantity should not be in this calculation',
            'C: Lets check if we find the formula among the end-of-chapter mathematical formulae?',
-           'Q: Does it really matter what the spurious quantity is?',
+           "Q: Does it really matter for quantity's name what spurious quantity is?",
+           "B: Just because the question mentions a quantity does not mean it is relevant for the calculation.",
            'L: Did they use spurious quantity in the worked example?'],
+    'A7': ['T: Use missing quantity in this calculation',
+           'C: Lets check if we find the formula among the end-of-chapter mathematical formulae?',
+           "Q: To calculate quantity's name, don't we need missing quantity?",
+           'L: In the worked example, didn''t they use missing quantity?'],
     'A6a': ['T: Answer does not match model answer',
             'C: Let''s check if we find the formula among the end-of-chapter mathematical formulae?',
-            'Q: Those units don''t seem to match the quantity',
-            'L: How did they get the answer in the worked example?'],
+            'Q: The units of the answer look good. Is there some other mixup?',
+            'L: How did they get the answer in the worked example? What is the result given in the textbook?'],
+    'A6b': ['T: Answer does not match model answer',
+            "C: Is the formula we used for quantity's name new in this chapter?",
+            "Q: Looks like we have an answer, but something is fishy",
+            "L: How did they calculate the answer in the worked example?"],
     'B0': ['Q: Cool, what do we do next?',
            'L: That was so original - now what?'],
     'B1': ['T: This is a correct step from the model answer',
@@ -1230,15 +1518,16 @@ hints_english = {
            "L: Let's compare this to the worked example?"],
     'B4': ['T: Calculation is not following path shown in example, although it might be valid',
            'B: Did we plug in the right quantities, or did we get confused?',
-           "L: Does calculating that quantity help us to get the answer? How did they proceed in the worked example?"],
+           'Q: Sometimes, even if the unit make sense, there is a problem with the calculation.'
+           "L: Does calculating quantity's name help us to get the answer? How did they proceed in the worked example?"],
     'B5': ["T: Unknown step, dimensionally incorrect",
            "B: Let's check whether the units we got are appropriate for the quantity's name (unit table)",
            'C: Do we have the wrong formula for the right quantity (check mathematical formulae)',
            "L: Did they even calculate the quantity's name in the worked example?"],
     'B6': ["T: Unknown step, unsure about dimensions",
-           "Q: Does this step help up reach our goal? (can2.py...)",
+           "Q: Does this step help us reach our goal?",
            "B: We should try to use conventional names for quantities so that others understand our calculation",
-           "L: Did they even calculate the quantity's name in the worked example?"],
+           "L: Did they even calculate quantity's name in the worked example?"],
 }
 
 
@@ -1316,24 +1605,20 @@ book_of_wisdom = {
         'We use electrochemistry to charge our cell phone batteries',
     18: 'Shiny metals',
     19: 'Even more pretty colors than in chapter 15',
-    20: 'Take the course (Orgo I and II, that is',
+    20: 'Take the course (Orgo I and II, that is)',
     21: 'Square of the distance, pal... walk away'
 }
 
 
 def chapterize(text, chapter, hwid, extra, name='dunno'):
-    text = '{"ico/%s.jpg" height ="100" style="display: inline" title="Psst... %s"}' % (text[0], name) + '<br>' + text[2:]
+    text = '{"ico/%s.jpg" height ="100" style="display: inline" title="Your turn"}' % text[0] + '<br>' + text[2:]
     if 'worked example' in text:
         link = '<a href="./%s" target="_blank">worked example</a>' % hwid[:-1]
         text = text.replace('worked example', link)
     if "this quantity type" in text:
         text = text.replace("this quantity type", 'the ' + name.split('of')[0])
-    if "quantity's name" in text:
-        text = text.replace("quantity's name", name)
     if "set of knowns" in text:
-        text = text.replace("set of knowns", name)
-    if "next goal" in text:
-        text = text.replace("next goal", name)
+        text = text.replace("set of knowns", extra)
     if "its chemical formula" in text:
         text = text.replace("its chemical formula", 'the chemical formula of ' + name.split('of ')[1])
     if 'missing quantity' in text:
@@ -1359,7 +1644,7 @@ def chapterize(text, chapter, hwid, extra, name='dunno'):
         else:
             wisdom = 'I got nothin'
         text = text.replace('chapter specific wisdom*', wisdom)
-        text = 'C spent hours in the library researching the types of questions in this chapter, and here is - in her own words - what she learned<br>' + text
+        #text = 'C spent hours in the library researching the types of questions in this chapter, and here is - in her own words - what she learned<br>' + text
     if 'Stoichiometry, signs, ln/log' in text:
         chapter = 1 if chapter == 'J' else int(chapter)
         if chapter in book_of_chapter_specific_errors:
@@ -1367,6 +1652,13 @@ def chapterize(text, chapter, hwid, extra, name='dunno'):
         else:
             wisdom = 'I got nothin'
         text = text.replace('Stoichiometry, signs, ln/log', wisdom)
+    if "quantity's name" in text:
+        text = text.replace("quantity's name", name)
+    elif "next goal" in text:
+        text = text.replace("next goal", name)
+    else:
+        text = text.replace("Your turn", name)
+
     return text
 
 
@@ -1633,7 +1925,7 @@ def report_calculation_matches(citems, cmatched, cscore):
     return r
 
 
-def calculation_hint(model, student, hwid, recalc, scores):
+def calculation_hint3452(model, student, hwid, recalc, scores):
     ddict_model, qstore1, cstore1, answers1, match1, context1 = model
     ddict_student, qstore2, cstore2, answers2, match2, context2 = student
     chapter = hwid[2:].split('.')[0]
@@ -1668,8 +1960,8 @@ def calculation_hint(model, student, hwid, recalc, scores):
             s_dep = all_dependencies(student_answer, cstore2, qstore2)
             m_dep = all_dependencies(a, cstore1, qstore1)
             m_dep = {match1.get(m, m) for m in m_dep}
-            spurious = ', '.join(pronounce(c) for c in s_dep - m_dep)
-            missing = ', '.join(pronounce(c) for c in m_dep - s_dep)
+            spurious = ', '.join(c for c in s_dep - m_dep)
+            missing = ', '.join(c for c in m_dep - s_dep)
             if spurious:
                 #rint('student', cstore2[student_answer][0])
                 #rint('model', cstore1[a][0])
@@ -1698,8 +1990,10 @@ def report_known_matches(model, student, scores, qu, im):
             if a[1:] in scores and scores[a[1:]].numerical > 95:
                 score_qu += 100
             else:
-                if a[1:] in match1 and match1[a[1:]] in answers2:
+                if a[1:] in match1 and (match1[a[1:]] in answers2 or match1[a[1:]] in cstore2):
                     score_qu += 100
+                    if not match1[a[1:]] in answers2:
+                        feedback.append('It would have been nice to announce your goal of calculating the ' + pronounce(a[1:]) + ', but no need to take off points.')
                 elif '!chemical equation' in a:
                     if 'chemical equation' in context2:
                         score_qu += 100
@@ -1720,8 +2014,7 @@ def report_known_matches(model, student, scores, qu, im):
                     name = str(qstore2[name])
                     feedback.append('Should have defined "' + name + '" before using it.')
                 else:
-                    name = pronounce(name)
-                    feedback.append(name + ' is (partially) incorrect ' + repr(scores[a]))
+                    feedback.append(pronounce(name) + ' is (partially) incorrect ' + str(qstore2[name]) + ' vs. ' + str(qstore1[a]))
         else:
             feedback.append(pronounce(a) + ' is missing from the knowns')
     if score_qu:
@@ -1752,3 +2045,7 @@ Empty, Calculation, ConversionIn, ConversionUsing, Comment, Flags, Unknown = ran
 
 
 inputq = '''Q(Fraction(1, 200), 'a', Units(kg=1), 0.0, {'g'})+Q(0.0043, '', Units(kg=1), 0.00010000000000000002, {'g'})'''
+
+if __name__ == '__main__':
+    for item in sorted(hints_english.keys()):
+        print(item, hints_english[item][0][3:])

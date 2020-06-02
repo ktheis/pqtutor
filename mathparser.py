@@ -71,7 +71,6 @@ def interpret(t, state, warning=True, keep_onthefly=False):
     try:
         expression = create_Python_expression(paired, state, warning=warning, keep_onthefly=keep_onthefly)
 ################ EVAL EVAl EVAL #######################
-        #rint('***************', expression)
         q = eval(expression)
 ################ EVAL EVAl EVAL #######################
         q.comment = comment
@@ -83,6 +82,9 @@ def interpret(t, state, warning=True, keep_onthefly=False):
         return q
     except OverflowError as duh:
         raise CalcError('<br>%s<br><br><div style="color: red;">Math overflow (thanks, Jonas): %s</div><br>' % (t, duh))
+    except SyntaxError:
+        raise CalcError('<br>%s<br><br><div style="color: red;">Could not process expression</div><br>' % t)
+
 
 
 
@@ -152,6 +154,27 @@ re_operator = ('O', r"[ ,()/*^+-]+")
 re_float = ('N', r"((\d*\.\d+)|(\d+\.?))(\(\d\d?\))?([Ee][+-]?\d+)?")
 re_identifier = ('I', r"[^\[ ,()/*\^+\-=]+(\[[^]]+\])?[^\[ ,()/*\^+\-=]*|\[[^]]+\][^\[ ,()/*\^+\-=]*")
 
+''' re_identifier = ('I', r"    [^\[ ,()/*\^+\-=]+              1 or >: anything other than "[] ,()/*^+-="  := AA
+                                (\[[^]]+\])?                    0 or 1: something other than "[" in []      := []
+                                [^\[ ,()/*\^+\-=]*              0 or >: anything other than "[] ,()/*^+-="  := AA
+                            |
+                                \[[^]]+\]                       something other than "[" in []              := []
+                                [^\[ ,()/*\^+\-=]*              0 or >: anything other than "[] ,()/*^+-="  := AA
+                                
+                                ")
+
+re_identifier = ('I', r"    [^\[ ,()/*\^+\-=]*              0 or >: anything other than "[] ,()/*^+-="  := AA
+                                \[[^]]+\]                    something other than "[" in []      := []
+                                [^\[ ,()/*\^+\-=]*              0 or >: anything other than "[] ,()/*^+-="  := AA
+                            |
+                                [^\[ ,()/*\^+\-=]+              1 or >: anything other than "[] ,()/*^+-="  := AA
+                                
+                                ")
+
+AA+
+AA*[]AA*
+
+'''
 def scan_it(text):
     answer = []
     while text:
@@ -225,13 +248,12 @@ def make_paired_tokens(raw_tokens, comma_error = True):
     for ttype, ttext in tokenit:
         if ttype == "O":
             if ttext:
+                if '()' in ttext:
+                    raise CalcError("empty parentheses not allowed in expression")
                 operator = ttext
             else:
                 operator = "*"
-            for c in operator:
-                if c in "+-*/^,":
-                    break
-            else:
+            if not any(c in "+-*/^," for c in operator):
                 operator = fixoperator(operator, tokens)
             if ',' in operator and comma_error:
                 if len(tokens) < 1 or not any(t[0] == 'F' for t in tokens):
@@ -240,7 +262,6 @@ def make_paired_tokens(raw_tokens, comma_error = True):
                 paren = pre.count('(') - pre.count(')')
                 for i,t in reversed(list(enumerate(tokens))):
                     if paren == 0 and t[1].startswith('(') and i > 0:
-                        #print (tokens)
                         if tokens[i-1][0] == 'F':
                             break
                         raise CalcError("commas are allowed only to separate arguments of functions; %s is not function" % tokens[i-1][2])
@@ -363,7 +384,7 @@ def create_Python_expression(paired_tokens, state, free_expression = False, warn
                     if keep_onthefly:
                         state[ttext] = q
                 else:
-                    raise CalcError("unknown symbol |%s| encountered" % ttext)
+                    raise CalcError("unknown symbol |%s| encountered (check spelling and capitalization)" % ttext)
             continue
         # ttype in "UN", i.e. either unit or number
         quant = ["Q('%s')" % ttext]
@@ -496,6 +517,10 @@ def interpret_N_U_cluster(quant, orig_paired, complaint, operator, result, state
     q.name = ""
     q.provenance = []
     if keep_onthefly and iscalculation and (q.units != Units() or q.uncert or q.number not in {1, -1, 2, -2, 3, -3, Fraction(1, 2), Fraction(-1, 2)}):
+        for qs in state:
+            if str(qs) == str(q):
+                q.twin = qs
+                break
         state.addsnuck(q)
         print('Added {} to state ({})'.format(q, repr(q)))
     return repr(q), paired[end:], operator
@@ -572,3 +597,7 @@ if __name__ == '__main__':
 
 
     print(repr(interpret('4.53 g/mol', BareState())))
+    for i in range(10000):
+        number = '31.' + '%04d' % i
+        if magic(number):
+            print(number)

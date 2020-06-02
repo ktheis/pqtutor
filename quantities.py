@@ -26,6 +26,7 @@ from math import sqrt as math_sqrt
 from fractions import Fraction
 import collections
 import re
+import string
 
 SIunit_symbols = ["A", "kg", "m", "s", "mol", "K", "Cd", "$"]
 
@@ -87,7 +88,7 @@ class Q(object):
             if 'M' in prefu:
                 self.prefu.add('L')
             if 'mol' in prefu:
-                self.prefu.add('M')
+                pass #self.prefu.add('M')
             self.uncert = uncert
             self.provenance = provenance
             self.comment = ''
@@ -322,7 +323,7 @@ def sigfig(number, uncert):
     if not uncert:
         return 100
     if not number:
-        return 0
+        return 1 - int(floor(math_log10(uncert * 1.05)))
     most = int(floor(math_log10(abs(number))))
     sig = int(floor(math_log10(uncert * 1.05)))
     sigfig = most - sig + 1
@@ -399,8 +400,8 @@ def latex_qvalue(q, guard, flags):
     else:
         try:
             uc = q.uncert * value / q.number
-        except:
-            uc = 0
+        except ZeroDivisionError:
+            uc = q.uncert
     sf = sigfig(value, uc)
     if '__showuncert__' in flags:
         numbertext = latex_number(ascii_number(value, sf, uc))
@@ -462,7 +463,7 @@ def try_all_derived(SIunits, derived):
     return max(iter(res))
 
 
-def unit_string(value, units, prefu={'M', 'L', 'J', 'C', 'V', 'N', 'W', 'Pa'}):
+def unit_string(value, units, prefu={'L', 'J', 'C', 'V', 'N', 'W', 'Pa'}):
     """Determine the most compact set of units for a quantity given in SI units. Also, choose which units of equal dimensions to
     choose while keeping the number near 1.
 
@@ -581,6 +582,8 @@ def ascii_number(number, sigfig, uncert=None, delta=0.0000000001):
     if (not uncert) and sigfig >= 100:
         return exact_number(number, delta)
     if number == 0.0 or number == 0:
+        if sigfig:
+            return '0.' + '0'*(sigfig-1)
         return "0"
     least, uncert_str = format_uncert(number, sigfig, uncert)
     if least < 0 and -2 < least + sigfig < 5:
@@ -743,9 +746,12 @@ def latex_name(name):
                 head, tail = name[:1], name[1:]
             elif re.match(r'^Δ.[0-9]+$', head):  # single character following by integer, i.e. v0
                 head, tail = name[:2], name[2:]
-            elif (head[0] != 'Δ') or len(head) > 2 :
-                head = r'\mathrm{%s}' % head
+            elif sum(1 for c in head if c in string.ascii_letters) > 1 :
+                head = r'\mathrm{%s}' % head.replace('&', r'\&').replace('%', r'\%').replace('$', r'\$')
     subscripts = re.findall(r'(\\ce{.*}|[^_]+)_', tail) # tail.split('_') but ignoring underscore within chem mark-up
+    head = head.replace('ᵣ','_r')
+    head = head.replace('\mathrm{ΔHf°}','ΔH_f°')
+    head = head.replace('\mathrm{ΔGf°}','ΔG_f°')
     if subscripts:
         if len(subscripts) == 2  and subscripts[1] and (len(subscripts[0]) == 1 or '\\ce{' in subscripts[0]):
             return head + r'_{\mathrm{' + ','.join(subscripts) + '}}'
@@ -881,7 +887,7 @@ def qsum(*a):
 
 def check_argument(f):
   def f_(*args, **kw):
-    fn= f.__name__
+    fn= f.__name__[1:]
     if len(args) > 1:
         raise_QuantError("This function cannot have more than one argument", fn + "(%s,%s ...)", (args[0],args[1]))
     if args[0].units != unity:

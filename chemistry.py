@@ -1,7 +1,6 @@
 import re
 from collections import defaultdict as ddict
 from fractions import Fraction
-
 from quantities import Units, Q, unitquant
 
 
@@ -184,7 +183,7 @@ def compare_reactions(req1, req2):
             spur = 'spurious: '+ ', '.join(deq2[s] for s in seq2-seq1)
         else:
             spur = ''
-        return 20 if mis and spur else 30, mis, spur, None, None
+        return 20 if mis and spur else 30, spur, mis, None, None
 
 
 formulae = ddict(list) # contains formulae by chapter, with priority
@@ -238,7 +237,7 @@ n[MgCl2] = m[MgCl2] / M[MgCl2]
 @m_molecule = M_compound / N_A # mass of a molecule
 #@! Priority 5
 M[CO2] = M[CO2]
-N_A = 6.022e-23 /mol
+N_A = 6.022e23 /mol
 m[CO2]molecule = M[CO2] / N_A
 <hr>
 @X_element = m_element / m_compound # composition by mass
@@ -1348,11 +1347,13 @@ def chunks(text):
             e = tx[0]
             tx = tx[1:]
         elif tx[0] == '(':
-            p = matching_closing(tx[1:])
+            #rint(tx)
+            p = matching_closing(tx[1:]) + 1
             e = tx[:p+1]
             tx = tx[p+2:]
+            #rint(p, e, tx)
         else:
-            raise CalcError('molar mass gone wrong', tx)
+            raise SyntaxError(tx)
         if not tx or not tx[0].isdigit():
             nr = 1
         else:
@@ -1366,7 +1367,7 @@ def chunks(text):
 
 def molar_mass(text):
     M = Q()
-    tx = text[:]
+    tx = text.replace('(aq)', '').replace('(s)', '').replace('(l)', '').replace('(g)', '')
     for element, nr in chunks(tx):
         if element.startswith('('):
             #rint (nr, '* (', end='')
@@ -1520,6 +1521,7 @@ naming_conventions = {
     'ρ': [(Units(kg=1, m=-3), 'density', 0)],
     'ν': [(Units(), 'stoichiometric coefficient', 0), (Units(s=-1), 'frequency', 0)],
     'λ': [(Units(m=1), 'wavelength', 0)],
+    'd': [(Units(m=1), 'length', 0)],
     'D': [(Units(kg=1, m=2, s=-2), 'bond dissociation energy', 0)],
     'q': [(Units(kg=1, m=2, s=-2), 'heat', 0)],
     'w': [(Units(kg=1, m=2, s=-2), 'work', 0)],
@@ -1547,6 +1549,7 @@ naming_conventions = {
     'pKa': [(Units(), 'pKa', 1)],
     'H_f': [(Units(kg=1, m=2, s=-2, mol=-1), 'heat of formation', 1)],
     'ΔHf°': [(Units(kg=1, m=2, s=-2, mol=-1), 'standard heat of formation', 1)],
+    'ΔGf°': [(Units(kg=1, m=2, s=-2, mol=-1), 'standard Gibbs energy of formation', 1)],
     'E_kinetic': [(Units(kg=1, m=2, s=-2), 'kinetic energy', 1)],
     'E_potential': [(Units(kg=1, m=2, s=-2), 'potential energy', 1)],
     'E_kin': [(Units(kg=1, m=2, s=-2), 'kinetic energy', 1)],
@@ -1560,6 +1563,12 @@ naming_conventions = {
     'K_freeze': [(Units(kg=-1, mol=1, K=1), 'freezing point depression constant', 1)],
     'c_p': [(Units(m=2, s=-2, K=-1), 'specific heat capacity', 1)],
     'c_P': [(Units(m=2, s=-2, K=-1), 'specific heat capacity', 1)],
+    'ΔᵣS°': [(Units(kg=1, m=2, s=-2, mol=-1, K=-1), 'standard entropy of reaction', 1)],
+    'ΔᵣS': [(Units(kg=1, m=2, s=-2, mol=-1, K=-1), 'entropy of reaction', 1)],
+    'ΔᵣH°': [(Units(kg=1, m=2, s=-2, mol=-1), 'standard enthalpy of reaction', 1)],
+    'ΔᵣH': [(Units(kg=1, m=2, s=-2, mol=-1), 'enthalpy of reaction', 1)],
+    'ΔᵣG°': [(Units(kg=1, m=2, s=-2, mol=-1), 'standard Gibbs energy of reaction', 1)],
+    'ΔᵣG': [(Units(kg=1, m=2, s=-2, mol=-1), 'Gibbs energy of reaction', 1)],
     'R': [(Units(kg=1, m=2, s=-2, mol=-1, K=-1), 'universal gas constant', 2)],
     'N_A': [(Units(mol=-1), "Avogadro's constant", 2)],
     'h_Planck': [(Units(A=(0, 1, 2, -1, 0, 0, 0, 0)), "Planck's constant", 2)],
@@ -1569,6 +1578,8 @@ naming_conventions = {
     'ℓ': [(Units(), 'angular quantum number', 2)],
     'm_ℓ': [(Units(), 'magnetic quantum number', 2)],
 }
+
+extensive = {'n', 'm', 'V'}
 
 typical_units_reverse = {}
 for symbol in naming_conventions:
@@ -1584,6 +1595,11 @@ def good_units(symbol, units):
         return False
     return any(units == item[0] for item in naming_conventions[symbol])
 
+def dimension_name(units):
+    return ' or '.join(item[1]
+            for symbol in naming_conventions
+                for item in naming_conventions[symbol]
+                    if item[0] == units)
 
 def quantity_name(symbol, units=None):
     if len(naming_conventions[symbol]) == 1 or not units:
@@ -1592,75 +1608,6 @@ def quantity_name(symbol, units=None):
         if units == item[0]:
             return item[1]
     return symbol
-
-
-SuperSpecials = dict([x.split(' ', 1) for x in '''R universal gas constant
-N_A Avogadro's constant
-h_Planck Planck's constant
-c0 speed of light
-g0 gravitational acceleration
-m_s spin quantum number
-ℓ angular quantum number
-m_ℓ magnetic quantum number'''.splitlines()])
-Specials = dict([x.split(' ', 1) for x in '''E_red reduction potential
-k_second_order second order rate constant
-k_first_order first order rate constant
-k_zero_order zero order rate constant
-t½ half life
-t_½ half life
-order_bond bond order
-T_freeze freezing temperature
-T_boil boiling temperature
-T_melt melting temperature
-K_A acid dissociation constant
-K_B base dissociation constant
-pKa pKa
-H_f heat of formation
-ΔHf° standard heat of formation
-E_kinetic kinetic energy
-E_potential potential energy
-E_kin kinetic energy
-E_pot potential energy
-pH pH
-pOH pOH
-E_kin kinetic energy
-E_pot potential energy
-E_bond bond energy
-P_vapor vapor pressure
-P° vapor pressure of pure
-K_boil boiling point elevation constant
-K_freeze freezing point depression constant
-c_p specific heat capacity
-c_P specific heat capacity'''.splitlines()])
-Qnames = [x.split(' ', 1) for x in '''V volume
-n chemical amount
-c concentration
-m mass
-M molar mass
-P pressure
-T temperature
-t time
-G Gibbs energy
-D bond dissociation energy
-H enthalpy
-Hf heat of formation
-S entropy
-q heat
-w work
-K equilibrium constant
-k rate constant
-ν stoichiometric coefficient
-ρ density
-λ wave length
-Π osmotic pressure
-E potential
-F force
-Q reaction quotient
-N number of particles
-'''.splitlines()]
-extensive = set('m V n'.split())
-
-Qdict = {q[0] : q[1] for q in Qnames}
 
 abbr = {
     'eq': 'equilibrium',
@@ -1695,6 +1642,7 @@ molecular
 atomic
 average
 estimated
+measured
 hydrostatic
 '''.splitlines()
 
@@ -1737,12 +1685,13 @@ Cl-(aq)          chloride ion               ?
 NO3-(aq)   nitrate ion               11
 Mg2+(aq)   magnesium ion               11
 CaO(s)     calcium oxide               11
+CaCl2     calcium chloride              ?
 CH4(g)     methane gas               11
 CH4     methane               ?
 Zn(s)      elemental zinc               11
 Hg(l)      liquid mercury               11
 Sr         strontium               11
-NO         nitrogenoxide               11
+NO         nitrogen oxide               11
 Na+(aq)    sodium ion               10
 SO3(g)     sulfur trioxide gas               10
 PO43-      phosphate ion               10
@@ -1756,7 +1705,7 @@ C2H5OH     ethanol               9
 Al(s)      elemental aluminum               9
 NaOH       sodium hydroxide               9
 CO2        carbon dioxide               9
-Ca(OH)2(aq)calcium hydroxide               8
+Ca(OH)2(aq) calcium hydroxide               8
 Fe2O3(s)   iron(III)oxide               8
 NH3(aq)    aqueous ammonia               8
 H2PO4-     dihydrogen phosphate ion               8
@@ -1765,7 +1714,8 @@ H2S        dihidrogen sulfide               8
 NO2        nitrogen dioxide               8
 H3PO4 phosphoric acid ?
 Ca(OH)2 calcium hydroxide  ?
-NaCl sodium chloride ?'''.splitlines()]
+NaCl sodium chloride ?
+H2O(s) ice ?'''.splitlines()]
 
 chemdict = {formula: name[:-2].rstrip() for formula, name, *_ in chemdatabase}
 
@@ -1866,6 +1816,8 @@ def pronounce(qname, units=None):
                 name = name + ' of ' + item.lower()
             else:
                 name = name + ' of ' + item
+        elif ' of particles' in name:
+            name = ' '.join(name.split(' particles')) + ' ' + item
         elif ' of ' in name:
             name = name + ' ' + item
         else:
@@ -1883,6 +1835,8 @@ def pronounce(qname, units=None):
 
 if __name__ == '__main__':
     print(molar_mass('CH4'))
+    print(molar_mass('CH2(OH)2'))
+    print(molar_mass('CH3(OH)'))
     print(pronounce('N[CH4(g)]'))
     print(pronounce('N[C2H6]'))
     print(pronounce('N[Mg]'))
@@ -1890,3 +1844,4 @@ if __name__ == '__main__':
     print(pronounce('m[Mg]'))
     print(pronounce('V[C2H6]'))
     print(pronounce('c_P'))
+    print(naming_conventions['t'][0][1])

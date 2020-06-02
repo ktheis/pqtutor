@@ -5,9 +5,9 @@ Everything to find math and chemistry in comments, mark it up and add links
 
 Call tree:
 
-create_comment
-    displayed_chemical_equation
-    displayed_algebra
+create_comment(a, state): a starts with '!@#' or failed to compute
+    displayed_chemical_equation (a, state): a starts with '!'
+    displayed_algebra(a, state): a starts with '@'
     markup_comment
         markup_math
             split_at_equal
@@ -101,26 +101,61 @@ def displayed_algebra(a, state):
     if len(state.output) < 2 or not state.output[-2].endswith('>'):
         state.printnlog('<br>')
     out = []
+    add = ''
+    try:
+        first = a[1:].split()[0]
+        if first.startswith('[') and first.endswith(']') and len(first) < 12:
+            a = a[len(first):]
+            add = first[:]
+    except:
+        add = ''
     comment = ''
     if '@' in a[1:]:
         a, comment = a.rsplit('@', maxsplit=1)
-    for exp0 in a[1:].split('='):
+    splitters = []
+    inbetween = []
+    bracket = 0
+    for c in a[1:]:
+        if c in '=≥≤<>' and bracket == 0:
+            splitters.append(c)
+            inbetween.append('=')
+        else:
+            inbetween.append(c)
+            if c == '[':
+                bracket += 1
+            elif c == ']':
+                bracket -= 1
+    inbetween = ''.join(inbetween)
+    for exp0 in inbetween.split('='):
         comment = format_math(comment, exp0, out)
+    comment = markup_comment(comment, toplevel=False)
     raw = a[1:] + '\\n'
+    result = []
+    for e,o in zip(out, splitters):
+        result.append(e)
+        result.append(' ' + o + ' ')
+    result.append(out[-1])
+    result = ''.join(result)
+    cl = clickable(raw, ' \\(%s\\)' % result)
+    return '''<div style="font-size:12pt; display: flex; justify-content: space-between;"><div>%s</div><div>%s &nbsp;&nbsp;&nbsp;&nbsp; %s</div><div></div></div>''' %(add, cl, comment)
     cl = clickable(raw, ' \\(%s\\)</span>&nbsp;&nbsp;%s' % (' = '.join(out), comment))
-    return '<div style="font-size:12pt; text-align: center;">%s</div>' % cl
+    return add+'<div style="font-size:12pt; text-align: center;">%s</div>' % cl
 
 
 def format_math(comment, exp0, out):
     if not exp0.strip():
         out.append('')
         return
-    paired, comment2 = make_paired_tokens(scan(exp0))
-    expression = create_Python_expression(paired, BareState(), free_expression=True, warning=False)
-    x = eval(expression)
-    x.setdepth()
-    out.append(x.steps(-1, quantities.latex_writer, subs=latex_subs))
-    return comment + comment2
+    try:
+        paired, comment2 = make_paired_tokens(scan(exp0))
+        expression = create_Python_expression(paired, BareState(), free_expression=True, warning=False)
+        x = eval(expression)
+        x.setdepth()
+        out.append(x.steps(-1, quantities.latex_writer, subs=latex_subs))
+        return comment2 + comment
+    except:
+        out.append('Failed to interpret math in: ' + exp0)
+        return exp0 + comment
 
 
 def displayed_chemical_equation(a, state):
@@ -140,15 +175,22 @@ def displayed_chemical_equation(a, state):
     except:
         add = ''
         app = ''
-    result = chemeq_addlinks(a[1:])
+    result = chemeq_addlinks(a[1:], '__negreact__' in state.flags)
     if app:
-        app = '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' + markup_comment(app)
+        app = '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' + markup_comment(app, toplevel=False)
     return ('''<div style="font-size:12pt; display: flex; justify-content: space-between;"><div>%s</div><div>%s %s</div><div></div></div>''' %
         (add, result, app))
 
 
-def markup_comment(b):
+def markup_comment(b, toplevel=True):
+    '''
+    Find chemistry and math in text and mark it up.
+    Used for entire input line (toplevel=True), and for comments after second @ or !
+    autodetect returns N=i!._ when it detects scientific notation, equal sign, integer, chemistry, plain word or quantity name
+    '''
+
     try:
+        #rint('markup_commment: ', b)
         #separate out into chemical equations and the rest
         listt = [item for word in split_at_blank(b) for item in autodetect(word)]
         if any(item[0] == '!' for item in listt):
@@ -172,8 +214,12 @@ def markup_comment(b):
             if formula:
                 newlist.append(('!', formula))
             listt = newlist[:]
+        for i, item in enumerate(listt):
+            if item[1].startswith('http://') or item[1].startswith('https://'):
+                listt[i] = ('<', '<a href="%s" target="_blank">%s</a>' % (item[1], item[1]))
         newlist = []
         math = ''
+        #rint('first pass:', '|'.join(':'.join(item) for item in listt))
         #separate math from chemistry, html, and {} image tags
         while listt:
             current = listt.pop(0)
@@ -186,6 +232,7 @@ def markup_comment(b):
                 math = math + current[1]
         if math:
             newlist.append(('.', math))
+        #rint('second pass:', '|'.join(':'.join(item) for item in newlist))
         listt = newlist[:]
         result = []
         for i, item in enumerate(listt):
@@ -199,17 +246,26 @@ def markup_comment(b):
                     blank = ' '
                 else:
                     blank = ''
-                result.append(clickable(item[1], '\\(\ce{%s}\\)%s' % (item[1], blank)))
+                result.append(clickable('['+item[1]+']', '\\(\ce{%s}\\)%s' % (item[1], blank)))
             elif len(list(split_at_equal(item[1]))) > 1:
                 result.append(markup_math(item[1]))
             else:
                 result.append(markup_all_but_math(item[1]))
+        if toplevel and len(result) == 1 and 'insertAtCaret' in result[0] and result[0][0] == '<' and result[0][-1] == '>':
+            result[0] = '<div style="font-size:12pt; text-align: center;">%s</div>' % result[0]
+        #rint('third pass:', '|'.join(result))
         return ''.join(result)
     except ZeroDivisionError:
         return(b)
 
 
 def markup_math(text):
+    '''
+    text contains math that needs to be marked up
+    equations are of the form: middle LHS = RHS middle LHS = RHS middle
+    text is first split at equal signs, and then blocks of RHS middle LHS are processed
+    right_of_equal() and left_of_equal() consume items in block, leaving middle if any
+    '''
     comment = []
     listt = list(split_at_equal(text))
     for i, block in enumerate(listt):
@@ -239,6 +295,8 @@ def markup_math(text):
 
 
 def split_at_blank(line):
+    if not line:
+        return ''
     openers = '"{<'
     closers = {'{':'}', '"': '"', '<': '>', '[': ']'}
     curword = []
@@ -291,6 +349,8 @@ def markup_all_but_math(line):
 
     :param line: String containing the comment
     :return: String with variables and chemistry marked-up in LateX
+    autodetect returns N=i!._ when it detects scientific notation, equal sign, integer, chemistry, plain word or quantity name
+
     """
     interpretation = []
     for item in (it for word in split_at_punctuation(line) for it in autodetect(word)):
@@ -687,12 +747,13 @@ def right_of_equal(scanned):
 import re
 
 
-def chemeq_addlinks(text):
+def chemeq_addlinks(text, neg_react=True):
     if '->' not in text and '<=>' not in text:
         return clickable('!' + text, '\\(\\ce{%s}\\)' % text)
     species = re.split(r'(->(?:\[[^]]+\])?|<=>(?:\[[^]]+\])?| \+)', text)
     species.append('')
     answer = []
+    sign = -1 if neg_react else 1
     for s, sep in zip(species[0::2], species[1::2]):
         s = s.strip()
         stoich = 1
@@ -705,8 +766,12 @@ def chemeq_addlinks(text):
                 stoich = 10 * stoich + digit
             else:
                 stoich = digit
+        else:
+            name = ''
+        stoich *= sign
         if sep.startswith('->') or sep.startswith('<=>'):
             sep = clickable('!' + text + '\\n', '\\(\\ce{%s}\\)' % sep)
+            sign = 1
         else:
             sep = '''\\(\\ce{ %s }\\)''' % sep.strip()
         insert = 'ν[%s] = %d\\n' % (name, stoich)
@@ -725,9 +790,9 @@ if __name__ == '__main__':
     print('|'.join(split_at_equal(text)))
     print('|'.join(split_at_punctuation(text)))
 
-    a = '''The concentration of calcium chloride, CaCl2, in the solution is 1.5e-12 mol/L
+    a = '''The concentration of http://google.com/bla?asdf=5 calcium chloride, CaCl2, in the solution is 1.5e-12 mol/L
     The reaction HOH -> H+ + OH- (aq) proceeds very quickly when NaCl and CuBr2 are heated
-    The relation is c = n/V, where n is the chemical amount of solute
+    The relation is Cobalt = n/V, where n is the chemical amount of solute
     The bla (n0 refers to the ground state) occurs'''.splitlines()
     b = 'The concentration of MgCl2 -> Mg^2+ + 2 Cl- is calculated as c[MgCl2] = b * 3.14 mg * n[MgCl2] / V_solution'
 

@@ -2,29 +2,525 @@
 from collections import defaultdict, namedtuple
 from collections import OrderedDict
 
+import re
+'''from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+Base = declarative_base()
+
+class Problem(Base):
+    __tablename__ = "problem"
+    id = Column(Integer, primary_key=True)
+    problem = Column(Text)
+    answer = Column(Text)
+    author = Column(String(100))
+
+class Homework(Base):
+    __tablename__ = "homework"
+    id = Column(Integer, primary_key=True)
+    answer = Column(Text)
+    author = Column(String(100))
+    course = Column(String(100))
+    problemid = Column(String(100))
+    sessionid = Column(Integer)
+
+
+class Touch(Base):
+    __tablename__ = "touch"
+    id = Column(Integer, primary_key=True)
+    session = Column(Integer)
+    input = Column(Text)
+    level = Column(Integer)
+    time = Column(DateTime)
+
+class PQSession(Base):
+    __tablename__ = "pqsession"
+    id = Column(Integer, primary_key=True)
+    course = Column(Integer)
+    ip = Column(String(100))
+    time = Column(DateTime)
+
+#engine = create_engine('sqlite:///sqlalchemy_problem.db')
+engine = create_engine('mysql+mysqldb://pqcalc:pianissimo@pqcalc.mysql.pythonanywhere-services.com/pqcalc$exercises?charset=utf8mb4', pool_recycle=280)
+
+Base.metadata.bind = engine
+DBSession = sessionmaker(bind=engine)
+#Base.metadata.create_all(engine)
+
+from contextlib import contextmanager
+
+@contextmanager
+def session_scope():
+    session = DBSession()
+    try:
+        yield session
+        session.commit()
+    except:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+def insert(session, problem, answer='', author="unknown"):
+    new_comment = Problem(problem=problem, answer=answer, author=author)
+    session.add(new_comment)
+    session.commit()
+    return new_comment.id
+
+
+def query(session, id):
+    try:
+        c = session.query(Problem).filter(Problem.id == id).one()
+    except:
+        return None
+    return c.problem, c.answer, c.author
+
+
+def continue_session(session, id, time, input, level=0):
+    t = Touch(time=time, session=id, input=input, level=level)
+    session.add(t)
+
+
+def start_session(session, ip, time, input, course='zero'):
+    new_comment = PQSession(ip=ip+'|'+str(course), time=time, course=0)
+    session.add(new_comment)
+    session.commit()
+    id = new_comment.id
+    continue_session(session, id, time, input)
+    return id
+
+
+def accept_homework_submission(session, answer, problemid, sessionid, author='', course=0):
+    hw = Homework(answer=answer, problemid=problemid, sessionid=sessionid, author=author, course=course)
+    session.add(hw)
+'''
+
+def atoi(text):
+    return int(text) if text.isdigit() else text
+
+
+def natural_keys(text):
+    '''
+    alist.sort(key=natural_keys) sorts in human order
+    http://nedbatchelder.com/blog/200712/human_sorting.html
+    (See Toothy's implementation in the comments)
+    '''
+    text2 = text.replace('.', ' ')
+    return [ atoi(c) for c in re.split('(\d+)', text) ]
 
 Record = namedtuple('record', 'Name Code Answer')
 
 example_data = dict()
 
+'''def add_problem(session, hw_text, author='unknown'):
+    id = ''
+    if '<h4>Answer:</h4>' in hw_text:
+        question, answer = hw_text.split('<h4>Answer:</h4>', maxsplit=1)
+        id = id + 'b'
+    else:
+        question, answer = hw_text, ''
+    while len(question) > 2 and question.endswith('\n\n'):
+        question = question[:-1]
+    while len(answer) > 2 and answer.endswith('\n\n'):
+        answer = answer[:-1]
+    idnr = insert(session, question, answer, author=author)
+    example_data[id] = Record(id, question, answer)
+    return 'C.' + str(idnr)+id
+'''
+
 def get_example(id):
     if id in example_data:
-        return example_data[id].Code
+        code = example_data[id].Code
+        if "." in id:
+            chapter = id.split(".")[0]
+            code = code.replace('Example ' + chapter, 'Example <a href="./ico/summary.html#%s" target="_blank">%s</a>' %(chapter, chapter))
+        return code
     return None
 
 def get_answer(id):
-    if not id in example_data:
+    if id in example_data:
+        result = example_data[id].Answer
+    else:
         return None, None
-    result = example_data[id].Answer
     if '<fillintheblank>' in result:
         return result.split('<fillintheblank>', maxsplit=1)
-    if 'Think about it' in result:
-        a, b = result.split('Think about it', maxsplit=1)
-        return a, 'Think about it'+b
+    if 'Think about it:' in result:
+        a, b = result.split('Think about it:', maxsplit=1)
+        return a, b
     return result, None
 
+def example_list():
+    outp = ['This example does not exist (yet). Try these instead<br>']
+    ids = [id for id in example_data if not id.startswith('Ex')]
+    for id in sorted(ids, key=natural_keys):
+        outp.append('<a href="/hw%s">%s</a><br>' % (id, example_data[id].Code.split('</h3>')[0][4:]))
+    return '\n'.join(outp)
+
+followup = [
+'''What best describes your problem-solving experience?
+a) I was mostly focused and engaged
+b) I got frustrated at times
+c) I was bored at times
+d) I got help outside of PQtutor''',
+'''How was you experience with the virtual study group?
+a) I did not ask for their input
+b) What they said was often confusing
+c) What they said was ofter obvious
+d) What they said was sometimes helpful''',
+'''How would you rate this homework problem?
+a) It was much too easy
+b) It was easy but good practice
+c) It was hard but good practice
+d) It was much too hard or confusing''',
+]
+
+counter = -1
+
+def metacognitive_followup():
+    global counter
+    counter = (counter + 1) % len(followup)
+    return followup[counter]
 
 example = '''
+problem = Calculator
+<h2>Calculator</h2>
+To use PQcalc, you enter text into the box (in this tutorial, we will call this box the "input box").
+You can either press "enter" on the keyboard or click "go" with the mouse to send you input to the calculator.
+<h3>Names</h3>
+First, name your quantities.
+__newby__ = 1
+one = 1
+two = 2
+__newby__ = 0
+For subscripts, use an underscore.
+__newby__ = 1
+N_atoms = 4530
+__newby__ = 0
+Use the "symbols" selector under the input box to add special characters.
+__newby__ = 1
+ΔN = 24
+__newby__ = 0
+<h3>Calculations</h3>
+You can calculate with the quantities you just entered. Again, start with a name (this time for the result of your calculation), add an equal sign and what you want to calculate.
+sum_one_two = one + two
+N_electrons = N_atoms * 6
+<h3>Shortcuts</h3>
+<ul>
+  <li>After naming quantities, you can paste their names into the input box by clicking on them (try it).</li>
+  <li>When multiplying two quantities, you can omit the multiplication symbol</li>
+  <li>If your last input needs fixing, just press the back button on your browser.</li>
+  <li>If you want to type multiple lines before running a calculation, use &lt;ctrl&gt;&lt;return&gt; to start the next line (you can also paste multiple lines into the input box).</li>
+</ul>
+<br>Next topic: <a href="./workedexampleNumbers">Numbers</a>
+
+problem = Numbers
+<h3>Significant figures</h3>
+Numbers without decimal point are considered exact. For all other numbers, the calculator keeps track of significant figures.
+__newby__ = 1
+π_approx = 3.14
+r_measured = 1.0
+circumference = 2 π_approx r_measured
+N_exact = 250
+N_tenth = N_exact / 10
+__newby__ = 0
+A decimal point at the end of a number means that the least significant figure is the ones.
+__newby__ = 1
+V_measured = 250.
+V_tenth = V_measured / 10
+__newby__ = 0
+<h3>Scientific notation</h3>
+Use an "e" or "E" to show the exponent for numbers entered in scientific notation. If these appear in comments, they will be formated, such as 6.022e23.
+__newby__ = 1
+N_big = 6.022e23
+N_small = 1.602e-19
+__newby__ = 0
+<h3>Shortcuts</h3>
+If there are numbers in the question such as 3.14 or 3.5e-34, just click on them to paste them into the input box (try it).
+<br>Next topic: <a href="./workedexampleUnits">Units</a>
+
+problem = Units
+<h2>Units</h2>
+<h3>Defined units</h3>
+To show variables with units, just type the unit after the number. All SI units with prefix are builtin, as are many non-SI units. If you want to see the complete list, click on the units selector under the box where you type your input.
+t1 = 15 s
+t2 = 2 min
+dist = 4.5 km
+<h3>Calculations with units</h3>
+As you can see, PQcalc converts units automatically if necessary.
+t_sum = t1 + t2
+v2 =  dist / t2
+PQcalc tries to cancel out units to simplify, and to stick with the units you started with:
+c[Na+]stock = 5.4 mmol/L
+V_stock = 4.0 mL
+V_diluted = 7.5 mL
+c[Na+]diluted = c[Na+]stock (V_stock / V_diluted)
+n[Na+] = c[Na+]stock V_stock
+<h3>Defining units</h3>
+If you have known quantities in non-SI units, you can first tell PQcalc what these units are in SI units, and then enter your quantities in the non-SI unit. PQcalc will convert to SI units and show those.
+mile = 1609.344 m
+marathon = 26.2 mile
+<h3>Converting units</h3>
+If you prefer a different SI-unit, use the "using" command to convert; the quantity will now always use the new unit. If you need a quantity converted to units that are not builtin, use the "in" command to show the quantity in those units.
+__newby__ = 1
+t_sum using s
+marathon in mile
+__newby__ = 0
+For some practice, try this <a href="./workedexampleunits_problem"  target="_blank">problem</a>
+<br>Next topic: <a href="./workedexampleChemicalEquations">Chemical Equations</a>
+
+problem = ChemicalEquations
+<h2>Chemical Equations</h2>
+<h3>Basics</h3>
+To type a chemical equation in a separate line, start the line with an exclamation point. The formating is done by a LaTeX package called mhchem, and the basic rules are illustrated here (
+write chemical formulas without subscripts, they are added automatically):
+__newby__ = 1
+!2H2(g) + O2(g) -> 2H2O(l)
+__newby__ = 0
+Charges are preceded by the "^" symbol (if it is plus one or minus one, you don't need this).
+__newby__ = 1
+! Na+ + S^2- <=> Na2S
+__newby__ = 0
+In a variable name, anything surrounded by brackets is formated as a chemical formula:
+__newby__ = 1
+c[H+] = 3.4 mmol
+k[->] = 61.2 mM/s
+__newby__ = 0
+For some practice, try this <a href="./workedexampleChemicalEquations_problem"  target="_blank">problem</a>
+
+<h3>Shortcuts</h3>
+If you click on one of the reactants or products, the stoichiometric factor will be pasted into the input box. If you click on the arrow, the entire chemical equation will be pasted (try it).
+
+<h3>Numbering, comments and conditions</h3>
+__newby__ = 1
+![1] 2H2 + O2 -> 2H2O
+![2] F2 + Cu -> CuF2 !explosive
+![3] CaO3 ->[heat] CaO + CO2
+__newby__ = 0
+<br>Next topic: <a href="./workedexampleFunctions">Functions</a>
+
+problem = Functions
+<h2>Mathematical functions</h2>
+You can find a complete list of functions in the selection list under the input box (check it out).
+<h3>Single argument</h3>
+Various common functions such as square root, logarithm, e to the power of x are accessible in PQcalc.
+arg = 2.91
+root = sqrt(arg)
+naturallog = ln(arg)
+antilog = exp(arg)
+<h3>Multiple arguments</h3>
+The functions quadn and quadp give the two solutions to solving the quadratic equation. If the solution is not a real number, an error message appears.
+arg2 = 0.32
+arg3 = -5.6
+__newby__ = 1
+solution1 = quadn(arg, arg2, arg3)
+solution2 = quadp(arg, arg2, arg3)
+__newby__ = 0
+<h3>Arbitrary number of arguments</h3>
+The minimum (min) and summation (sum) functions give the minimum or the sum of all arguments.
+__newby__ = 1
+minimum = min(4,2,5,6,2,5)
+total = sum(4,2,5,6,2,5)
+__newby__ = 0
+Also try the average (avg) and maximum (max) functions.
+<h3>Functions unique to PQcalc</h3>
+The functions FtoKscale and CtoKscale are for convenience, converting the unitless argument into a temperature on the Kelvin scale. Temperatures using the Celsius scale can also be entered directly, but using either °aC for temperatures and °ΔC for temperature differences so that they are can be appropriately converted to the Kelvin scale. The uncertainty and moredigits functions are mostly for debugging.
+<br>Next topic: <a href="./workedexampleComments">Comments</a>
+
+problem = Comments
+<h2>Comments</h2>
+<h3>Unknowns or goals</h3>
+To formulate goals in your calculation, name your goal, add an equal sign and a question mark:
+__newby__ = 1
+c[H+] = ?
+__newby__ = 0
+This will be interpreted as a comment, and if you are using the homework tutor, will be used in prompts to figure out how to determine the unknown.
+<h3>Algebra</h3>
+PQcalc does not do any symbolic computation, but it allows you to show algebra in the comments. Any line starting with the @ symbol will display mathematical equations without doing calculations.
+__newby__ = 1
+@ p V_gas = n R T
+__newby__ = 0
+To annotate an equation, add a comment after a second @ sign
+__newby__ = 1
+@ p V_gas = n R T @ ideal gas law
+__newby__ = 0
+<h3>Shortcuts</h3>
+Clicking on a mathematical equation will paste it into the input box (try it). Clicking on an unknown will paste it into the input box with an equal sign appended. Anything user input does not look like a calculation will be intepreted as comment, and chemical formulas and mathematical equations will be formatted.
+
+problem = units_problem
+Try it yourself: The empty beaker has a mass of 26.5434 g and the substance in it a mass of 52.3 mg. What is the total mass using grams and using milligrams as units?
+For a model answer, click <a href="./exampleunits_modelanswer" target="_blank">here</a>
+
+problem = units_modelanswer
+Model answer: The empty beaker has a mass of 26.5434 g and the substance in it a mass of 52.3 mg. What is the total mass using grams and using milligrams as units?
+First, we write down what we know.
+m_empty = 26.5434 g
+m_substance = 52.3 mg
+Then, we let PQtutor to the math
+m_total = m_empty + m_substance
+The answer was given in grams. To get the answer in milligram:
+m_total using mg
+
+
+problem = ChemicalEquations_problem
+Try it yourself: Write the unbalanced equations showing the neutralization reaction of magnesium hydroxide with acetic acid. Indicate that this first reaction is not yet balanced. For the second equation, balance the first.
+For a model answer, click <a href="./exampleChemicalEquations_modelanswer" target="_blank">here</a>
+
+problem = ChemicalEquations_modelanswer
+Model answer: Write the unbalanced equation showing the neutralization reaction of magnesium hydroxide with acetic acid. Indicate that this first reaction is not yet balanced. For the second equation, balance the first.
+![1] Mg(OH)2 + CH3COOH -> Mg(CH3COO)2 + H2O ! ... not balanced yet
+![2] Mg(OH)2 + 2 CH3COOH -> Mg(CH3COO)2 + 2H2O !
+
+'''
+
+examples = example.split('problem = ')
+
+exdict = OrderedDict()
+exhtml = []
+index = ['To see tutorial topics, click on the links. <br>']
+
+for ex in examples:
+    if "\n" not in ex:
+        continue
+    head2, prob = ex.split("\n", 1)
+    if not head2:
+        continue
+    url = head2.split()[0]
+    exhtml.append('<a href="/example%s">%s</a><br>' % (url, head2))
+    if not url.endswith('_problem') and not url.endswith('_modelanswer'):
+        index.append('<a href="/workedexample%s">%s</a> <br>' % (url, head2))
+    exhtml.append('<br>\n'.join(prob.replace('<', '&lt;').replace('>', '&gt;').splitlines()))
+    exdict[url] = prob
+
+inhtml = "".join(index)
+exhtml = "".join(exhtml)
+exhtml = inhtml + '<hr>' + exhtml
+trackinglog = defaultdict(list)
+
+
+
+
+'''for key in exdict:
+    get_example(key)
+'''
+#print(exhtml)
+
+def check_one(ex):
+    print(ex[2])
+    print('*******************************************************')
+    print(ex[3])
+    answer = input('ok?')
+
+'''def check_examples():
+    exadict = defaultdict(list)
+    connection = sqlite3.connect(database='examples')
+    cursor = connection.cursor()
+    cursor.execute("SELECT * from homework")
+    for example in cursor:
+        if example[1].startswith('q4') and example[1].endswith('b'):
+            print('****', example[1], '****')
+            lines = example[3].splitlines()
+            while lines and '=' not in lines[0]:
+                lines.pop(0)
+            for l in lines:
+                if l.startswith('Think about'):
+                    break
+                if l:
+                    print(l)
+        exadict[example[1]].append(example[0])
+    #connection.close()
+    #return
+    k = exadict.keys()
+    k2 = []
+    for a in k:
+        try:
+            if '.' not in a or not a[0].isdigit():
+                continue
+            before, after = a.split(".", maxsplit=1)
+            b = ''
+            if after.endswith('b'):
+                after = after[:-1]
+                b = 'b'
+            if len(exadict[a])>1:
+                b = b + ' duplicated'
+            k2.append(f'{int(before):02d}.{int(after):02d}{b}')
+        except ValueError:
+            print(f'trouble with {a}')
+    for ex in sorted(k2):
+        print(ex)
+    for exa in exadict:
+        if not exa.startswith('3'):
+            continue
+
+        if len(exadict[exa]) > 1:
+            print(f'duplicate example {exa}: {exadict[exa]}')
+        cursor.execute("SELECT * from homework WHERE Id = ?;", (exadict[exa][0],))
+        check_one(cursor.fetchone())
+    connection.close()
+
+
+#check_examples()
+'''
+with open('logfile.txt', 'r', encoding='utf-8') as hw_file:
+    for hw_text in hw_file.read().split('<h3>'):
+        if not hw_text:
+            continue
+        hw_title = hw_text.splitlines()[0]
+        if ' ' in hw_title:
+            if hw_title.startswith('Chapter'):
+                _, section, _, number = hw_title.split()
+                hw_id = 'Ex' + section[:-1] + '.' + number[:-5]
+            else:
+                hw_id = hw_title.split()[1][:-1]
+        else:
+            hw_id = hw_title[:]
+        hw_text = hw_text.replace('\n\n', '\n')
+        if hw_id == '3.10b':
+            pass  # rint('exman', exman)
+        if '<h4>Answer:</h4>' in hw_text:
+            question, answer = hw_text.split('<h4>Answer:</h4>', maxsplit=1)
+        else:
+            question, answer = hw_text, ''
+            if hw_id[-1].isalpha():
+                print(hw_id, 'has no answer')
+        if hw_id[-1].isalpha() and 'Think about it:' not in answer:
+            pass #rint(hw_id, 'has no followup')
+        while len(question) > 2 and question.endswith('\n\n'):
+            question = question[:-1]
+        while len(answer) > 2 and answer.endswith('\n\n'):
+            answer = answer[:-1]
+
+        example_data[hw_id] = Record(hw_id, '<h3>' + question, answer)
+        if not hw_id.startswith('Ex') and '.' in hw_id:
+            ch, prob = hw_id.split('.')
+            try:
+                if len(prob) == 1 or prob[1] == 'b':
+                    prob = '0' + prob
+                trackinglog[int(ch)].append(prob)
+            except:
+                pass  # rint(shortk)
+
+if __name__ == '__main__':
+
+    for ch in range(1, 25):
+        if ch in trackinglog:
+            print('Chapter', ch, ':', ' '.join((a[1:] if a[0] == '0' else a) for a in sorted(trackinglog[ch])))
+            lines = 0
+            answers = 0
+            for a in sorted(trackinglog[ch]):
+                if a[0] == '0':
+                    a = a[1:]
+                    if a.endswith('b'):
+                        lines += sum(1 for line in get_answer(str(ch) + '.'+ a)[0].splitlines() if line)
+                        answers += 1
+                        if ch == 5:
+                            print('Answer to ', str(ch) + '.'+ a)
+                            print (get_answer(str(ch) + '.'+ a)[0])
+            if lines:
+                print(ch, '%4.2f' % (lines/answers))
+
+example_old = '''
 
 problem = 1.1b Calculation of Density
 <h3>Example 1.1b: Calculation of Density</h3>
@@ -771,153 +1267,3 @@ Note that this result is the same as for the strong acid-strong base titration e
 
 
 '''
-
-examples = example.split('problem = ')
-
-exdict = OrderedDict()
-exhtml = []
-index = ['The index below shows examples from OpenStax Chemistry, which is available for free at http://cnx.org/content/col11760/1.9. To explore how these examples are solved using PQcalc, click on the links. To browse other examples and see the content, skip to the bottom of this page.']
-
-chapter = 0
-for ex in examples:
-    if "\n" not in ex:
-        continue
-    head2, prob = ex.split("\n", 1)
-    if not head2:
-        continue
-    url = head2.split()[0]
-    if not chapter and head2.endswith('Density'):
-        chapter = 1
-        index.append('<h4>Chapter 1</h4>')
-    if chapter:
-        try:
-            ch = int(head2.split('.')[0])
-            if ch != chapter:
-                index.append('<h4>Chapter %d</h4>' % ch)
-                chapter = ch
-        except:
-            pass
-    if head2.startswith('Ex'):
-        exhtml.append('<a href="/example%s">Exercise %s</a><br>' % (url, head2[2:]))
-        if chapter:
-            index.append('<a href="/workedexample%s">Exercise %s</a> <a href="/example%s">(text)</a><br>' % (url, head2[2:]), url)
-    else:
-        exhtml.append('<a href="/example%s">Example %s</a><br>' % (url, head2))
-        if chapter:
-            index.append('<a href="/workedexample%s">Example %s</a> <a href="/example%s">(text)</a><br>' % (url, head2, url))
-    exhtml.append('<br>\n'.join(prob.replace('<', '&lt;').replace('>', '&gt;').splitlines()))
-    exdict[url] = prob
-
-inhtml = "".join(index)
-exhtml = "".join(exhtml)
-exhtml = inhtml + '<hr>' + exhtml
-trackinglog = defaultdict(list)
-
-
-
-
-'''for key in exdict:
-    get_example(key)
-'''
-#print(exhtml)
-
-def check_one(ex):
-    print(ex[2])
-    print('*******************************************************')
-    print(ex[3])
-    answer = input('ok?')
-
-'''def check_examples():
-    exadict = defaultdict(list)
-    connection = sqlite3.connect(database='examples')
-    cursor = connection.cursor()
-    cursor.execute("SELECT * from homework")
-    for example in cursor:
-        if example[1].startswith('q4') and example[1].endswith('b'):
-            print('****', example[1], '****')
-            lines = example[3].splitlines()
-            while lines and '=' not in lines[0]:
-                lines.pop(0)
-            for l in lines:
-                if l.startswith('Think about'):
-                    break
-                if l:
-                    print(l)
-        exadict[example[1]].append(example[0])
-    #connection.close()
-    #return
-    k = exadict.keys()
-    k2 = []
-    for a in k:
-        try:
-            if '.' not in a or not a[0].isdigit():
-                continue
-            before, after = a.split(".", maxsplit=1)
-            b = ''
-            if after.endswith('b'):
-                after = after[:-1]
-                b = 'b'
-            if len(exadict[a])>1:
-                b = b + ' duplicated'
-            k2.append(f'{int(before):02d}.{int(after):02d}{b}')
-        except ValueError:
-            print(f'trouble with {a}')
-    for ex in sorted(k2):
-        print(ex)
-    for exa in exadict:
-        if not exa.startswith('3'):
-            continue
-
-        if len(exadict[exa]) > 1:
-            print(f'duplicate example {exa}: {exadict[exa]}')
-        cursor.execute("SELECT * from homework WHERE Id = ?;", (exadict[exa][0],))
-        check_one(cursor.fetchone())
-    connection.close()
-
-
-#check_examples()
-'''
-with open('./mysite/logfile.txt', 'r', encoding='utf-8') as hw_file:
-    for hw_text in hw_file.read().split('<h3>'):
-        if not hw_text:
-            continue
-        hw_title = hw_text.splitlines()[0]
-        if ' ' in hw_title:
-            if hw_title.startswith('Chapter'):
-                _, section, _, number = hw_title.split()
-                hw_id = 'Ex' + section[:-1] + '.' + number[:-5]
-            else:
-                hw_id = hw_title.split()[1][:-1]
-        else:
-            hw_id = hw_title[:]
-        hw_text = hw_text.replace('\n\n', '\n')
-        if hw_id == '3.10b':
-            pass  # rint('exman', exman)
-        if '<h4>Answer:</h4>' in hw_text:
-            question, answer = hw_text.split('<h4>Answer:</h4>', maxsplit=1)
-        else:
-            question, answer = hw_text, ''
-            if hw_id.endswith('b'):
-                print(hw_id, 'has no answer')
-        if hw_id.endswith('b') and 'Think about it:' not in answer:
-            pass #rint(hw_id, 'has no followup')
-        while len(question) > 2 and question.endswith('\n\n'):
-            question = question[:-1]
-        while len(answer) > 2 and answer.endswith('\n\n'):
-            answer = answer[:-1]
-
-        example_data[hw_id] = Record(hw_id, '<h3>' + question, answer)
-        if not hw_id.startswith('Ex') and '.' in hw_id:
-            ch, prob = hw_id.split('.')
-            try:
-                if len(prob) == 1 or prob[1] == 'b':
-                    prob = '0' + prob
-                trackinglog[int(ch)].append(prob)
-            except:
-                pass  # rint(shortk)
-
-if __name__ == '__main__':
-
-    for ch in range(1, 25):
-        if ch in trackinglog:
-            print('Chapter', ch, ':', ' '.join((a[1:] if a[0] == '0' else a) for a in sorted(trackinglog[ch])))

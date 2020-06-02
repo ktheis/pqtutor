@@ -2,6 +2,7 @@
 from quantities import functions, known_units
 from html import escape, unescape
 from database import exhtml, exdict
+import urllib.parse
 
 selector = '''
 <select %s onchange="insertAtCaret('commands',this.options[this.selectedIndex].value, %s);">
@@ -28,7 +29,7 @@ function_list.extend(["using  ", "in  "])
 function_selector = fill_selector("functions", function_list, backup=1)
 
 # special symbol selector, pre-baked
-symbol_list = ["°aC","μ", " ％", "ν","Δ", "ℎνλ","ΔᵣG°′","ρ","∞", "ΦΨ"]
+symbol_list = ["°","μ", "ΔHf°"," ％", "ν","Δ", "ℎνλ","ΔᵣG°","ρ","∞", "ΦΨ"]
 symbol_selector = fill_selector("symbols", symbol_list)
 
 def quant_selectors(known):
@@ -39,10 +40,12 @@ def quant_selectors(known):
 example_template = '''
 <h3>How to use PQcalc</h3>
 <p>PQcalc is an online calculator for students learning science in college.
-To learn how to use it by example, click on any of the examples below, look at the
-input, then press go and study the output. A more comprehensive documentation of
-the program is  <a href="http://www.bioinformatics.org/pqcalc/manual">here</a>.
-<h3>Example calculations</h3>%s
+To learn how to use it by example, click on any of the tutorials below. A more comprehensive (but slightly outdated) documentation of
+the program is  <a href="http://www.bioinformatics.org/pqcalc/manual">here</a>, and a paper describing the features is <a href="https://pubs.acs.org/doi/abs/10.1021/acs.jchemed.5b00366"> here </a>.
+
+<h3>Help with General Chemistry</h3>
+<a href="http:./ico/studytools.html">Study tools</a>
+<h3>Tutorial topics</h3>%s
 '''
 
 
@@ -50,16 +53,14 @@ def helpform(mob=None):
     return example_template % exhtml
 
 
-def newform(result, oldlog, inputlog,
-            browser=None, actualpref='', prefill="",
-            action='.', button2=' Save ', otherbuttons=('export', 'help', 'reset'),
-            show_top=False, hints=''):
+def newform(result, oldlog, inputlog, actualpref='', prefill="",
+            action='.', button2='help', otherbuttons=('export', 'reset'),
+            show_top=False, hints='', metadata=''):
     '''
 
     :param result: calculated results from user input - (verboselog, brieflog, memory, known, linespace)
     :param oldlog: work from previous calculations
     :param inputlog: all user input (previous and current)
-    :param browser:
     :param actualpref: text to place in textarea
     :param prefill: reference to example input to place in textarea
     :param action: local url to visit after form submission
@@ -77,11 +78,10 @@ def newform(result, oldlog, inputlog,
     memory = escape(memory, quote=True)
     inputlog = escape(inputlog, quote=True)
     hints = escape(hints, quote=True)
-
     # assemble widgets
-    keyb = "" if browser else 'class="keyboardInput"'
-    selectors = quant_selectors(known)
-    selectors = selectors + unit_selector + function_selector + symbol_selector
+    keyb = 'class="keyboardInput"'
+    #selectors = quant_selectors(known)
+    selectors = unit_selector + function_selector + symbol_selector
     obut_text = ''.join('<input type="submit" name = "sub" value="%s" />\n' % but for but in otherbuttons)
     rows = 3
     if prefill and prefill in exdict:
@@ -95,37 +95,66 @@ def newform(result, oldlog, inputlog,
 
     data = dict(output=out, memory=memory, rows=rows, selectors=selectors, logbook=log, keyboard=keyb,
                 prefill=prefill, head=head, buttons=buttons, linespacing=linespace, logo=logo,
-                inputlog=inputlog, action=action, button2=button2, obut_text=obut_text, hints=hints)
+                inputlog=inputlog, action=action, button2=button2, obut_text=obut_text, hints=hints, metadata=metadata)
     if show_top:
         data['head'] = head_noscroll
         return template_noninteractive % data
     return template % data
 
 
+def submitform(result, oldlog, inputlog, actualpref='', prefill="",
+            action='.', button2='help', otherbuttons=('export', 'reset'),
+            show_top=False, hints='', metadata=''):
+
+    verboselog, brieflog, memory, known, linespace = result
+    log = escape(oldlog, quote=True) + "\n" + escape(brieflog, quote=True)
+    out = unescape(oldlog) + verboselog
+    memory = escape(memory, quote=True)
+    inputlog = escape(inputlog, quote=True)
+    hints = escape(hints, quote=True)
+    keyb = 'class="keyboardInput"'
+    selectors = unit_selector + function_selector + symbol_selector
+    obut_text = ''.join('<input type="submit" name = "sub" value="%s" />\n' % but for but in otherbuttons)
+    if prefill and prefill in exdict:
+        prefill = exdict[prefill][:-2]
+    elif actualpref:
+        prefill  = actualpref
+
+    data = dict(output=out, memory=memory, selectors=selectors, logbook=log, keyboard=keyb,
+                prefill=prefill, head=head, buttons=buttons, linespacing=linespace, logo='',
+                inputlog=inputlog, action=action, button2=button2, obut_text=obut_text, hints=hints, metadata=metadata)
+    return template_submit % data
+
 def printableLog(symbols, logbook, inputlog):
     known = "\n".join([s + "=" + si.__str__() for s, si in symbols.items()])
-    return printable_view % (known, escape(inputlog), logbook)
+    inputlog_hidden = escape(inputlog, quote=True)
+    #logbook = logbook.replace(r'\(',' $').replace(r'\)','$ ').replace('$  $', '')
+    return printable_view % (known, escape(inputlog), inputlog_hidden, logbook,
+                             urllib.parse.quote(inputlog.encode('utf8')))
 
 
 
 
 head = '''<head>
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="format-detection" content="telephone=no">
 <meta name="viewport" content="width=device-width; initial-scale=0.8;">
 
 <link rel="shortcut icon" href="/ico/favicon.ico">
 
-<script type="text/javascript"
-  src="http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML">
+
+<script type="text/javascript" id="MathJax-script" async
+  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js">
 </script>
 
 <script type="text/x-mathjax-config">
   MathJax.Hub.Config({
+    "fast-preview": {disabled: true},
+    tex2jax: {preview: ["[...]"]},
     TeX: { extensions: ["[Contrib]/mhchem/mhchem.js"] },
-    "HTML-CSS": {scale: 90}
+    "HTML-CSS": {size:90}
     });
 </script>
-
 
 <script type="text/javascript">
 
@@ -305,7 +334,9 @@ td, th {
 </head>
 '''
 
-buttons = '''
+buttons = ''
+
+oldbuttons = '''
 <input type="button" value="+" onclick="insertAtCaret('commands','+',0);" />
 <input type="button" value="-" onclick="insertAtCaret('commands','-',0);" />
 <input type="button" value="*" onclick="insertAtCaret('commands',' * ',0);" />
@@ -341,20 +372,53 @@ template = '''<html>
             %(output)s</div>
             <div class="page-break"></div>
             <form enctype="multipart/form-data" action="%(action)s" method="post" id="myform">
-            <textarea onkeypress="process(event)" autofocus rows="%(rows)d" cols="80" id="commands" name="commands" %(keyboard)s  type="number" autocapitalize="off"
+            <textarea onkeypress="process(event)" autofocus rows="%(rows)d" cols="40" id="commands" name="commands" %(keyboard)s  type="number" autocapitalize="off"
               autocomplete="on" spellcheck="false" style="font-weight: bold; font-size: 12pt;"
               >%(prefill)s</textarea> <p>
             <input type="submit" name="sub" style="font-weight: bold; font-size: 18pt;" value="  go  ">
             <input type="submit" name="sub" style="font-weight: bold; font-size: 18pt;" value="%(button2)s">
 
-            %(selectors)s </p>
+            %(selectors)s
             %(buttons)s
-            %(obut_text)s
+            %(obut_text)s </p>
 
             <input type="hidden" name="memory" value = "%(memory)s"/>
             <input type="hidden" name="inputlog" value = "%(inputlog)s"/>
             <input type="hidden" name="logbook" value = "%(logbook)s"/>
             <input type="hidden" name="hints" value = "%(hints)s"/>
+            <input type="hidden" name="metadata" value = "%(metadata)s"/>
+</form>
+</body>
+</html>
+'''
+
+template_submit = '''<html>
+%(head)s
+<body>
+
+    %(logo)s
+    <div style="line-height:%(linespacing)s">
+
+            %(output)s</div>
+            <div class="page-break"></div>
+            <form enctype="multipart/form-data" action="%(action)s" method="post" id="myform">
+            <textarea onkeypress="process(event)" autofocus rows="1" cols="4" id="commands" name="commands" %(keyboard)s  type="number" autocapitalize="off"
+              autocomplete="on" spellcheck="false" style="font-weight: bold; font-size: 12pt;"
+              >%(prefill)s</textarea> <p>
+            <input type="submit" name="sub" style="font-weight: bold; font-size: 18pt;" value="  go  ">
+            <input type="submit" name="sub" style="font-weight: bold; font-size: 18pt;" value="%(button2)s">
+
+            %(selectors)s
+            %(buttons)s
+            %(obut_text)s </p>
+            
+
+
+            <input type="hidden" name="memory" value = "%(memory)s"/>
+            <input type="hidden" name="inputlog" value = "%(inputlog)s"/>
+            <input type="hidden" name="logbook" value = "%(logbook)s"/>
+            <input type="hidden" name="hints" value = "%(hints)s"/>
+            <input type="hidden" name="metadata" value = "%(metadata)s"/>
 </form>
 </body>
 </html>
@@ -366,7 +430,7 @@ template_noninteractive = '''<html>
     %(logo)s
     <div style="line-height:%(linespacing)s">
 
-            <textarea rows="%(rows)d" cols="80" id="commands" name="commands" type="number" autocapitalize="off"
+            <textarea rows="%(rows)d" cols="40" id="commands" name="commands" type="number" autocapitalize="off"
               autocomplete="on" spellcheck="false" style="font-weight: bold; font-size: 12pt;"
               >%(prefill)s</textarea> <p>
             %(output)s</div>
@@ -429,13 +493,19 @@ Program currently hosted at
 bioinformatics.org/PQCalc </a> and
 <a href="http://ktheis.pythonanywhere.com/">
 http://ktheis.pythonanywhere.com/ </a>
-<h2> Known quantities </h2>
-<PRE>%s</PRE>
 <h2> Input </h2>
 <PRE>%s</PRE>
-
+<div><form action="." method="post">
+<input type="submit" name="sub" value="resubmit"/>
+<input type="hidden" name="inputlog" value = "%s"/>
+</form>
+</div>
+<h2> Known quantities </h2>
+<PRE>%s</PRE>
 <h2> Log of the calculation </h2>
 %s
+<h2> Send input via link </h2>
+pqcalc.pythonanywhere.com/?prefill=%s
 </div>
 </body>
 </html>
